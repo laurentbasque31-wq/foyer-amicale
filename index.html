@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestion Stock - Amicale SP Rieumes</title>
+    <link rel="icon" href="./logo.png" type="image/png">
+    <link rel="apple-touch-icon" href="./logo.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Moteur Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        pompier: {
+                            navy: '#1a2b4c',
+                            red: '#e3001b',
+                            anthracite: '#374151'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col justify-between">
+    <div id="root" class="flex-grow"></div>
+
+    <footer class="bg-pompier-navy text-gray-400 text-xs py-4 text-center border-t border-gray-800">
+        <p>© 2026 - Conçu et développé par <strong>Laurent Basque</strong> • Amicale des Sapeurs-Pompiers de Rieumes</p>
+    </footer>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // =================================================================
+        // 1. CONFIGURATION FIREBASE
+        // =================================================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyCMcdctGoLFbIjn7Nx5JPsjI5UoRNcQd0I",
+            authDomain: "foyer-amicale-b874f.firebaseapp.com",
+            databaseURL: "https://foyer-amicale-b874f-default-rtdb.europe-west1.firebasedatabase.app",
+            projectId: "foyer-amicale-b874f",
+            storageBucket: "foyer-amicale-b874f.firebasestorage.app",
+            messagingSenderId: "860277578881",
+            appId: "1:860277578881:web:c1474b81085dbaf2a88180"
+        };
+        
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const db = firebase.database();
+
+        // =================================================================
+        // 2. APPLICATION PRINCIPALE
+        // =================================================================
+        function App() {
+            const [activeTab, setActiveTab] = useState('sorties');
+            const [stock, setStock] = useState({});
+            const [fournisseurs, setFournisseurs] = useState({});
+            const [showOrderModal, setShowOrderModal] = useState(false);
+            const [showAddModal, setShowAddModal] = useState(false);
+            const [newProduct, setNewProduct] = useState({ nom: '', format: 'Pack', seuil: 5, fournisseurId: '' });
+
+            // Synchronisation Firebase en temps réel
+            useEffect(() => {
+                const stockRef = db.ref('stock');
+                const fourRef = db.ref('fournisseurs');
+
+                stockRef.on('value', (snapshot) => { setStock(snapshot.val() || {}); });
+                fourRef.on('value', (snapshot) => { setFournisseurs(snapshot.val() || {}); });
+
+                return () => {
+                    stockRef.off();
+                    fourRef.off();
+                };
+            }, []);
+
+            const stockArray = Object.entries(stock).map(([id, data]) => ({ id, ...data }));
+            const itemsInAlert = stockArray.filter(item => item.quantite <= item.seuil);
+
+            // Actions sur la base de données
+            const handleSaveProduct = (e) => {
+                e.preventDefault();
+                db.ref('stock').push({
+                    nom: newProduct.nom,
+                    quantite: 0,
+                    seuil: newProduct.seuil,
+                    format: newProduct.format,
+                    fournisseurId: newProduct.fournisseurId
+                });
+                setShowAddModal(false);
+            };
+
+            const handleUpdateQty = (id, currentQty, amount) => {
+                const newQty = currentQty + amount;
+                if(newQty >= 0) db.ref(`stock/${id}`).update({ quantite: newQty });
+            };
+
+            const handleRemoveStock = (id) => {
+                if(confirm("Supprimer ce produit définitivement ?")) db.ref(`stock/${id}`).remove();
+            };
+
+            const handleAddFournisseur = () => {
+                const nom = prompt("Nom du fournisseur:");
+                if(nom) db.ref('fournisseurs').push({ nom, email: "", tel: "" });
+            };
+
+            const handleUpdateFournisseur = (id, field, value) => {
+                db.ref(`fournisseurs/${id}`).update({ [field]: value });
+            };
+
+            const handleRemoveFournisseur = (id) => {
+                if(confirm("Supprimer ce fournisseur du carnet d'adresses ?")) db.ref(`fournisseurs/${id}`).remove();
+            };
+
+            return (
+                <div>
+                    <header class="bg-pompier-navy text-white shadow-lg border-b-4 border-pompier-red">
+                        <div class="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
+                            <div class="flex items-center space-x-4">
+                                <div class="bg-white p-1 rounded-xl">
+                                    <img src="./logo.png" alt="Ecusson CIS Rieumes" class="h-14 w-14 object-contain" />
+                                </div>
+                                <div>
+                                    <h1 class="text-2xl font-bold uppercase tracking-wider">Amicale SP Rieumes</h1>
+                                    <p class="text-gray-300 text-sm">Gestion des stocks du Foyer</p>
+                                </div>
+                            </div>
+                            <button 
+                                onClick={() => setShowOrderModal(true)}
+                                class={`px-4 py-2 rounded-lg font-bold flex items-center space-x-2 transition-colors ${itemsInAlert.length > 0 ? 'bg-pompier-red hover:bg-red-700 animate-pulse' : 'bg-gray-600 hover:bg-gray-500'}`}
+                            >
+                                <i class="fa-solid fa-shopping-cart"></i>
+                                <span>Commander</span>
+                                {itemsInAlert.length > 0 && (
+                                    <span class="bg-white text-pompier-red px-2 py-0.5 rounded-full text-sm">
+                                        {itemsInAlert.length}
+                                    </span>
+                                )}
+                            </button>
+                        </div>
+                        <div class="max-w-6xl mx-auto px-4 mt-2 flex space-x-2 overflow-x-auto">
+                            <button onClick={() => setActiveTab('sorties')} class={`px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'sorties' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
+                                <i class="fa-solid fa-arrow-right-from-bracket"></i><span>Gestion des sorties</span>
+                            </button>
+                            <button onClick={() => setActiveTab('stock')} class={`px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'stock' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
+                                <i class="fa-solid fa-box"></i><span>État des stocks</span>
+                            </button>
+                            <button onClick={() => setActiveTab('fournisseurs')} class={`px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'fournisseurs' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
+                                <i class="fa-solid fa-address-book"></i><span>Fournisseurs</span>
+                            </button>
+                        </div>
+                    </header>
+
+                    <main class="max-w-6xl mx-auto px-4 py-8">
+                        {activeTab === 'sorties' && (
+                            <SortiesTab stock={stockArray} onUpdateQty={handleUpdateQty} />
+                        )}
+
+                        {activeTab === 'stock' && (
+                            <div>
+                                <div class="flex justify-between items-center mb-6">
+                                    <h2 class="text-2xl font-bold text-pompier-navy">Inventaire du Foyer</h2>
+                                    <button onClick={() => { setNewProduct({ nom: '', format: 'Pack', seuil: 5, fournisseurId: '' }); setShowAddModal(true); }} class="bg-pompier-navy text-white px-4 py-2 rounded shadow hover:bg-blue-900">
+                                        <i class="fa-solid fa-plus mr-2"></i> Ajouter
+                                    </button>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                    {stockArray.map(item => {
+                                        const isAlert = item.quantite <= item.seuil;
+                                        const isWarning = item.quantite <= item.seuil + 2 && !isAlert;
+                                        const statusColor = isAlert ? 'bg-red-100 border-red-500' : isWarning ? 'bg-orange-100 border-orange-500' : 'bg-white border-gray-200';
+                                        const fournisseurName = item.fournisseurId && fournisseurs[item.fournisseurId] ? fournisseurs[item.fournisseurId].nom : "Sans fournisseur";
+
+                                        return (
+                                            <div key={item.id} class={`p-4 rounded-xl border-l-4 shadow-sm flex flex-col justify-between ${statusColor}`}>
+                                                <div class="flex justify-between items-start">
+                                                    <div>
+                                                        <h3 class="font-bold text-lg">{item.nom}</h3>
+                                                        <p class="text-xs text-gray-500">{item.format} • {fournisseurName}</p>
+                                                    </div>
+                                                    <button onClick={() => handleRemoveStock(item.id)} class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
+                                                </div>
+                                                <div class="mt-4 flex items-center justify-between">
+                                                    <div class="text-sm"><span class="text-gray-500">Seuil: {item.seuil}</span></div>
+                                                    <div class="flex items-center space-x-3 bg-gray-100 rounded-lg p-1">
+                                                        <button onClick={() => handleUpdateQty(item.id, item.quantite, -1)} class="w-8 h-8 flex justify-center items-center bg-white rounded shadow text-pompier-navy hover:bg-gray-50"><i class="fa-solid fa-minus"></i></button>
+                                                        <span class="font-bold text-xl w-8 text-center">{item.quantite}</span>
+                                                        <button onClick={() => handleUpdateQty(item.id, item.quantite, 1)} class="w-8 h-8 flex justify-center items-center bg-pompier-navy rounded shadow text-white hover:bg-blue-900"><i class="fa-solid fa-plus"></i></button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'fournisseurs' && (
+                            <div>
+                                <div class="flex justify-between items-center mb-6">
+                                    <h2 class="text-2xl font-bold text-pompier-navy">Carnet d'adresses</h2>
+                                    <button onClick={handleAddFournisseur} class="bg-pompier-navy text-white px-4 py-2 rounded shadow hover:bg-blue-900">
+                                        <i class="fa-solid fa-plus mr-2"></i> Ajouter
+                                    </button>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {Object.entries(fournisseurs).map(([id, f]) => (
+                                        <div key={id} class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 relative group">
+                                            <button onClick={() => handleRemoveFournisseur(id)} class="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors">
+                                                <i class="fa-solid fa-trash"></i>
+                                            </button>
+                                            
+                                            <h3 class="font-bold text-lg mb-3 text-pompier-navy pr-8">{f.nom}</h3>
+                                            <div class="space-y-2">
+                                                <div class="flex items-center">
+                                                    <i class="fa-solid fa-envelope w-6 text-gray-400"></i>
+                                                    <input type="email" placeholder="Email de commande" value={f.email} onChange={(e) => handleUpdateFournisseur(id, 'email', e.target.value)} class="flex-1 bg-gray-50 border rounded px-2 py-1 text-sm outline-none focus:border-pompier-red"/>
+                                                </div>
+                                                <div class="flex items-center">
+                                                    <i class="fa-solid fa-phone w-6 text-gray-400"></i>
+                                                    <input type="tel" placeholder="Téléphone pour SMS" value={f.tel} onChange={(e) => handleUpdateFournisseur(id, 'tel', e.target.value)} class="flex-1 bg-gray-50 border rounded px-2 py-1 text-sm outline-none focus:border-pompier-red"/>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </main>
+
+                    {/* MODALE D'AJOUT DE PRODUIT */}
+                    {showAddModal && (
+                        <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
+                            <div class="bg-white rounded-xl shadow-2xl max-w-md w-full">
+                                <div class="bg-pompier-navy text-white px-6 py-4 rounded-t-xl flex justify-between items-center">
+                                    <h2 class="text-xl font-bold">Nouveau Produit</h2>
+                                    <button onClick={() => setShowAddModal(false)} class="text-white hover:text-gray-200"><i class="fa-solid fa-times text-xl"></i></button>
+                                </div>
+                                <form onSubmit={handleSaveProduct} class="p-6 space-y-4">
+                                    <div>
+                                        <label class="block text-sm font-bold mb-1 text-gray-700">Nom de l'article</label>
+                                        <input required type="text" value={newProduct.nom} onChange={e => setNewProduct({...newProduct, nom: e.target.value})} class="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-pompier-red outline-none" placeholder="ex: Jus d'orange" />
+                                    </div>
+                                    <div class="flex space-x-4">
+                                        <div class="flex-1">
+                                            <label class="block text-sm font-bold mb-1 text-gray-700">Format</label>
+                                            <input required type="text" value={newProduct.format} onChange={e => setNewProduct({...newProduct, format: e.target.value})} class="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-pompier-red outline-none" placeholder="ex: Pack" />
+                                        </div>
+                                        <div class="flex-1">
+                                            <label class="block text-sm font-bold mb-1 text-gray-700">Seuil d'alerte</label>
+                                            <input required type="number" min="0" value={newProduct.seuil} onChange={e => setNewProduct({...newProduct, seuil: parseInt(e.target.value)})} class="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-pompier-red outline-none" />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-bold mb-1 text-gray-700">Fournisseur</label>
+                                        <select value={newProduct.fournisseurId} onChange={e => setNewProduct({...newProduct, fournisseurId: e.target.value})} class="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-pompier-red outline-none bg-white">
+                                            <option value="">-- Sans fournisseur --</option>
+                                            {Object.entries(fournisseurs).map(([fId, f]) => (
+                                                <option key={fId} value={fId}>{f.nom}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div class="pt-4">
+                                        <button type="submit" class="w-full bg-pompier-red text-white font-bold py-3 rounded-lg hover:bg-red-700 shadow-md transition-colors">
+                                            <i class="fa-solid fa-check mr-2"></i> Ajouter au stock
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* MODALE DE COMMANDE */}
+                    {showOrderModal && (
+                        <OrderModal 
+                            onClose={() => setShowOrderModal(false)} 
+                            stock={stockArray} 
+                            fournisseurs={fournisseurs} 
+                        />
+                    )}
+                </div>
+            );
+        }
+
+        // =================================================================
+        // COMPOSANT: ONGLET GESTION DES SORTIES DE STOCK
+        // =================================================================
+        function SortiesTab({ stock, onUpdateQty }) {
+            const [cart, setCart] = useState({});
+
+            const handleCartChange = (id, delta, maxStock) => {
+                setCart(prev => {
+                    const current = prev[id] || 0;
+                    const next = Math.max(0, current + delta);
+                    if (next > maxStock) return prev;
+                    if (next === 0) {
+                        const copy = { ...prev };
+                        delete copy[id];
+                        return copy;
+                    }
+                    return { ...prev, [id]: next };
+                });
+            };
+
+            const confirmValidation = () => {
+                if (Object.keys(cart).length === 0) return;
+                
+                Object.entries(cart).forEach(([id, qtyToRemove]) => {
+                    const item = stock.find(i => i.id === id);
+                    if (item) {
+                        onUpdateQty(id, item.quantite, -qtyToRemove);
+                    }
+                });
+
+                setCart({});
+                alert("Sorties enregistrées avec succès ! Le stock a été mis à jour.");
+            };
+
+            const totalItemsCount = Object.values(cart).reduce((a, b) => a + b, 0);
+
+            return (
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Liste des produits à sortir */}
+                    <div class="lg:col-span-2 space-y-4">
+                        <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                            <h2 class="text-xl font-bold text-pompier-navy mb-2"><i class="fa-solid fa-arrow-right-from-bracket mr-2"></i> Enregistrer des sorties de stock</h2>
+                            <p class="text-sm text-gray-500 mb-4">Sélectionne les quantités sorties du foyer (garde, manœuvre, permanence) pour mettre à jour l'inventaire.</p>
+
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                {stock.map(item => {
+                                    const qtyInCart = cart[item.id] || 0;
+                                    const remainingStock = item.quantite - qtyInCart;
+
+                                    return (
+                                        <div key={item.id} class="bg-gray-50 border rounded-xl p-3 flex flex-col justify-between">
+                                            <div class="flex justify-between items-start mb-2">
+                                                <div>
+                                                    <h3 class="font-bold text-pompier-navy">{item.nom}</h3>
+                                                    <span class="text-xs text-gray-500">Stock dispo : <strong class={remainingStock <= item.seuil ? "text-red-600 font-bold" : ""}>{remainingStock}</strong></span>
+                                                </div>
+                                                <span class="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded">{item.format}</span>
+                                            </div>
+
+                                            <div class="flex items-center justify-between mt-2 pt-2 border-t border-gray-200">
+                                                <span class="text-xs font-semibold text-gray-600">Quantité sortie :</span>
+                                                <div class="flex items-center space-x-2 bg-white border rounded px-2 py-1 shadow-sm">
+                                                    <button 
+                                                        onClick={() => handleCartChange(item.id, -1, item.quantite)} 
+                                                        class="w-7 h-7 flex items-center justify-center text-gray-600 hover:text-pompier-red rounded"
+                                                    >
+                                                        <i class="fa-solid fa-minus text-xs"></i>
+                                                    </button>
+                                                    <span class="w-6 text-center font-bold text-pompier-navy">{qtyInCart}</span>
+                                                    <button 
+                                                        onClick={() => handleCartChange(item.id, 1, item.quantite)} 
+                                                        class={`w-7 h-7 flex items-center justify-center rounded text-white ${remainingStock > 0 ? 'bg-pompier-navy hover:bg-blue-900' : 'bg-gray-300 cursor-not-allowed'}`}
+                                                        disabled={remainingStock <= 0}
+                                                    >
+                                                        <i class="fa-solid fa-plus text-xs"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Panneau récapitulatif des sorties */}
+                    <div class="lg:col-span-1">
+                        <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 sticky top-4">
+                            <h3 class="font-bold text-lg text-pompier-navy mb-3 flex items-center justify-between">
+                                <span><i class="fa-solid fa-list-check mr-2"></i> Sortie en cours</span>
+                                <span class="bg-pompier-red text-white text-xs px-2 py-1 rounded-full">{totalItemsCount} art.</span>
+                            </h3>
+
+                            {Object.keys(cart).length === 0 ? (
+                                <p class="text-sm text-gray-400 italic py-6 text-center">Aucun article sélectionné.</p>
+                            ) : (
+                                <div class="space-y-3 mb-6 max-h-60 overflow-y-auto pr-1">
+                                    {Object.entries(cart).map(([id, qty]) => {
+                                        const item = stock.find(i => i.id === id);
+                                        if (!item) return null;
+                                        return (
+                                            <div key={id} class="flex justify-between items-center text-sm border-b pb-2">
+                                                <div>
+                                                    <span class="font-semibold">{item.nom}</span>
+                                                    <span class="text-xs text-gray-400 block">{item.format}</span>
+                                                </div>
+                                                <div class="flex items-center space-x-2">
+                                                    <span class="font-bold text-pompier-red">-{qty}</span>
+                                                    <button onClick={() => handleCartChange(id, -qty, item.quantite)} class="text-gray-400 hover:text-red-600">
+                                                        <i class="fa-solid fa-trash text-xs"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+
+                            <button 
+                                onClick={confirmValidation}
+                                class={`w-full py-3 rounded-lg font-bold shadow transition-colors flex items-center justify-center space-x-2 ${totalItemsCount > 0 ? 'bg-pompier-red text-white hover:bg-red-700' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                                disabled={totalItemsCount === 0}
+                            >
+                                <i class="fa-solid fa-check"></i>
+                                <span>Valider et déduire du stock</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // =================================================================
+        // COMPOSANT: MODALE DE COMMANDE
+        // =================================================================
+        function OrderModal({ onClose, stock, fournisseurs }) {
+            const [orderQties, setOrderQties] = useState({});
+            
+            const toOrder = stock.filter(item => item.quantite <= item.seuil);
+            
+            useEffect(() => {
+                const initial = {};
+                toOrder.forEach(item => {
+                    initial[item.id] = (item.seuil - item.quantite) + 2;
+                });
+                setOrderQties(initial);
+            }, []);
+
+            const adjustQty = (id, amount) => {
+                setOrderQties(prev => ({ ...prev, [id]: Math.max(0, (prev[id] || 0) + amount) }));
+            };
+
+            const groupedOrders = {};
+            toOrder.forEach(item => {
+                const fId = item.fournisseurId || 'unassigned';
+                if (!groupedOrders[fId]) groupedOrders[fId] = [];
+                groupedOrders[fId].push(item);
+            });
+
+            const generateText = (items) => {
+                let lines = [];
+                items.forEach(item => {
+                    if (orderQties[item.id] > 0) {
+                        lines.push(`- ${orderQties[item.id]}x ${item.nom} (${item.format})`);
+                    }
+                });
+                return lines.join('\n');
+            };
+
+            const handleEmail = (fId, items) => {
+                const fData = fournisseurs[fId];
+                if (!fData || !fData.email) return alert("Adresse e-mail non renseignée pour ce fournisseur.");
+                
+                const list = generateText(items);
+                if(!list) return alert("Aucune quantité sélectionnée.");
+
+                const body = `Bonjour,\n\nVoici notre commande pour l'Amicale des Sapeurs-Pompiers de Rieumes :\n\n${list}\n\nMerci de nous confirmer la préparation de cette commande.\n\nCordialement,\nLe Bureau de l'Amicale`;
+                window.location.href = `mailto:${fData.email}?subject=Commande Amicale SP Rieumes&body=${encodeURIComponent(body)}`;
+            };
+
+            const handleSMS = (fId, items) => {
+                const fData = fournisseurs[fId];
+                if (!fData || !fData.tel) return alert("Numéro de téléphone non renseigné pour ce fournisseur.");
+                
+                const list = generateText(items);
+                if(!list) return alert("Aucune quantité sélectionnée.");
+
+                const body = `Commande Amicale SP Rieumes :\n${list}\n\nMerci ! (Le Bureau)`;
+                const cleanPhone = fData.tel.replace(/\s+/g, '');
+                window.location.href = `sms:${cleanPhone}?body=${encodeURIComponent(body)}`;
+            };
+
+            return (
+                <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
+                    <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col">
+                        <div class="bg-pompier-red text-white px-6 py-4 rounded-t-xl flex justify-between items-center shrink-0">
+                            <h2 class="text-xl font-bold"><i class="fa-solid fa-paper-plane mr-2"></i> Préparation des commandes</h2>
+                            <button onClick={onClose} class="text-white hover:text-gray-200"><i class="fa-solid fa-times text-xl"></i></button>
+                        </div>
+                        
+                        <div class="p-6 overflow-y-auto">
+                            {toOrder.length === 0 ? (
+                                <p class="text-center text-gray-500 py-8 font-bold">Aucun produit en rupture, tout est au vert !</p>
+                            ) : (
+                                Object.keys(groupedOrders).map(fId => {
+                                    const items = groupedOrders[fId];
+                                    const fData = fId === 'unassigned' ? { nom: "Sans Fournisseur Associé" } : fournisseurs[fId];
+                                    
+                                    return (
+                                        <div key={fId} class="bg-gray-50 p-4 rounded-lg mb-6 border border-gray-200 shadow-sm">
+                                            <h3 class="font-bold text-pompier-navy mb-4 text-lg border-b pb-2">{fData.nom}</h3>
+                                            
+                                            {items.map(item => (
+                                                <div key={item.id} class="flex justify-between items-center py-2">
+                                                    <div>
+                                                        <span class="font-semibold">{item.nom}</span>
+                                                        <span class="text-xs text-red-500 ml-2">(En stock: {item.quantite})</span>
+                                                    </div>
+                                                    <div class="flex items-center space-x-2 bg-white rounded border px-2 py-1">
+                                                        <button onClick={() => adjustQty(item.id, -1)} class="w-6 h-6 text-gray-600 hover:text-pompier-red"><i class="fa-solid fa-minus text-xs"></i></button>
+                                                        <span class="w-8 text-center font-bold text-pompier-navy">{orderQties[item.id] || 0}</span>
+                                                        <button onClick={() => adjustQty(item.id, 1)} class="w-6 h-6 text-gray-600 hover:text-green-600"><i class="fa-solid fa-plus text-xs"></i></button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            
+                                            {fId !== 'unassigned' && (
+                                                <div class="mt-4 pt-4 border-t border-gray-200 flex space-x-3">
+                                                    <button onClick={() => handleEmail(fId, items)} class={`flex-1 py-2 rounded font-bold shadow flex justify-center items-center transition-colors ${fData.email ? 'bg-pompier-red text-white hover:bg-red-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>
+                                                        <i class="fa-solid fa-envelope mr-2"></i> E-mail
+                                                    </button>
+                                                    <button onClick={() => handleSMS(fId, items)} class={`flex-1 py-2 rounded font-bold shadow flex justify-center items-center transition-colors ${fData.tel ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>
+                                                        <i class="fa-solid fa-mobile-screen-button mr-2"></i> SMS
+                                                    </button>
+                                                </div>
+                                            )}
+                                            {fId === 'unassigned' && (
+                                                <p class="text-xs text-orange-500 mt-2 italic"><i class="fa-solid fa-triangle-exclamation"></i> Associez ces produits à un fournisseur pour pouvoir envoyer une commande.</p>
+                                            )}
+                                        </div>
+                                    )
+                                })
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
