@@ -43,9 +43,13 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // =================================================================
-        // 1. CONFIGURATION FIREBASE
-        // =================================================================
+        // ==========================================
+        // CODE MAÎTRE (Gravé dans le marbre)
+        // ==========================================
+        // Profil Administrateur suprême : permet de voir/supprimer les codes PIN et vider l'historique
+        const CODE_PURGE = "0801"; 
+
+        // Configuration Firebase
         const firebaseConfig = {
             apiKey: "AIzaSyCMcdctGoLFbIjn7Nx5JPsjI5UoRNcQd0I",
             authDomain: "foyer-amicale-b874f.firebaseapp.com",
@@ -61,59 +65,202 @@
         }
         const db = firebase.database();
 
-        // =================================================================
-        // 2. APPLICATION PRINCIPALE
-        // =================================================================
         function App() {
+            // Mode et Rôles
+            const [userRole, setUserRole] = useState(sessionStorage.getItem('foyer_role') || null);
+            const isAdmin = userRole === 'bureau' || userRole === 'master';
+            const isMaster = userRole === 'master';
+
+            const [showAdminLogin, setShowAdminLogin] = useState(false);
+            const [adminPin, setAdminPin] = useState('');
+            
+            // Mémoire de l'utilisateur
+            const [utilisateur, setUtilisateur] = useState(localStorage.getItem('foyer_utilisateur') || '');
+
             const [activeTab, setActiveTab] = useState('sorties');
             const [stock, setStock] = useState({});
             const [fournisseurs, setFournisseurs] = useState({});
+            const [famillesList, setFamillesList] = useState([]);
+            const [codesBureau, setCodesBureau] = useState({});
+            const [selectedCategory, setSelectedCategory] = useState('Toutes');
+            
+            // Modales
+            const [showProductModal, setShowProductModal] = useState(false);
+            const [editingProduct, setEditingProduct] = useState(null);
             const [showOrderModal, setShowOrderModal] = useState(false);
-            const [showAddModal, setShowAddModal] = useState(false);
-            const [newProduct, setNewProduct] = useState({ nom: '', format: 'Pack', seuil: 5, fournisseurId: '' });
+            const [showRestockModal, setShowRestockModal] = useState(false);
+            const [restockItem, setRestockItem] = useState(null);
+            const [restockQty, setRestockQty] = useState('');
+            const [showManageFamillesModal, setShowManageFamillesModal] = useState(false);
+            const [newFamilleInput, setNewFamilleInput] = useState('');
 
-            // Synchronisation Firebase en temps réel
+            // Synchronisation Firebase
             useEffect(() => {
                 const stockRef = db.ref('stock');
                 const fourRef = db.ref('fournisseurs');
+                const famRef = db.ref('familles');
+                const codesRef = db.ref('parametres/codesBureau');
 
                 stockRef.on('value', (snapshot) => { setStock(snapshot.val() || {}); });
                 fourRef.on('value', (snapshot) => { setFournisseurs(snapshot.val() || {}); });
+                
+                famRef.on('value', (snapshot) => {
+                    const data = snapshot.val();
+                    if (data) {
+                        setFamillesList(Object.entries(data).map(([id, val]) => ({ id, nom: val.nom })));
+                    } else {
+                        const defauts = ['Boissons', 'Snacks', 'Café / Chaud'];
+                        defauts.forEach(nom => famRef.push({ nom }));
+                    }
+                });
+
+                // Chargement des codes PIN dynamiques
+                codesRef.on('value', (snapshot) => {
+                    const data = snapshot.val();
+                    if (data) {
+                        setCodesBureau(data);
+                    } else {
+                        // Création du premier code par défaut
+                        codesRef.push({ nom: "Bureau (Défaut)", pin: "1818" });
+                    }
+                });
 
                 return () => {
                     stockRef.off();
                     fourRef.off();
+                    famRef.off();
+                    codesRef.off();
                 };
             }, []);
 
-            const stockArray = Object.entries(stock).map(([id, data]) => ({ id, ...data }));
+            const stockArray = Object.entries(stock).map(([id, data]) => ({
+                id,
+                famille: data.famille || (famillesList[0] ? famillesList[0].nom : 'Boissons'),
+                ...data
+            }));
+
+            const availableCategories = ['Toutes', ...famillesList.map(f => f.nom)];
+            const filteredStock = selectedCategory === 'Toutes' ? stockArray : stockArray.filter(item => item.famille === selectedCategory);
             const itemsInAlert = stockArray.filter(item => item.quantite <= item.seuil);
 
-            // Actions sur la base de données
+            // GESTION CONNEXION BUREAU & MAÎTRE
+            const handleAdminLogin = (e) => {
+                e.preventDefault();
+                const validPins = Object.values(codesBureau).map(c => c.pin);
+                
+                if (adminPin === CODE_PURGE) {
+                    // Connexion Profil Maître (Accès Total)
+                    setUserRole('master');
+                    sessionStorage.setItem('foyer_role', 'master');
+                    setShowAdminLogin(false);
+                    setAdminPin('');
+                } else if (validPins.includes(adminPin)) {
+                    // Connexion Profil Bureau Standard
+                    setUserRole('bureau');
+                    sessionStorage.setItem('foyer_role', 'bureau');
+                    setShowAdminLogin(false);
+                    setAdminPin('');
+                } else {
+                    alert("Code PIN incorrect ou non reconnu.");
+                    setAdminPin('');
+                }
+            };
+
+            const handleAdminLogout = () => {
+                setUserRole(null);
+                sessionStorage.removeItem('foyer_role');
+                setActiveTab('sorties');
+            };
+
+            // Fonctions du stock
+            const handleOpenAddModal = () => {
+                const defaultFam = famillesList.length > 0 ? famillesList[0].nom : 'Boissons';
+                setEditingProduct({ id: null, nom: '', famille: defaultFam, format: 'Canette 33cl', seuil: 5, quantite: 0, fournisseurId: '' });
+                setShowProductModal(true);
+            };
+
+            const handleOpenEditModal = (item) => {
+                setEditingProduct({ ...item });
+                setShowProductModal(true);
+            };
+
             const handleSaveProduct = (e) => {
                 e.preventDefault();
-                db.ref('stock').push({
-                    nom: newProduct.nom,
-                    quantite: 0,
-                    seuil: newProduct.seuil,
-                    format: newProduct.format,
-                    fournisseurId: newProduct.fournisseurId
-                });
-                setShowAddModal(false);
+                const payload = {
+                    nom: editingProduct.nom,
+                    famille: editingProduct.famille || (famillesList[0] ? famillesList[0].nom : 'Boissons'),
+                    format: editingProduct.format || 'Unité',
+                    seuil: Number(editingProduct.seuil) || 0,
+                    fournisseurId: editingProduct.fournisseurId || ''
+                };
+
+                if (editingProduct.id) {
+                    db.ref(`stock/${editingProduct.id}`).update(payload);
+                } else {
+                    payload.quantite = Number(editingProduct.quantite) || 0;
+                    db.ref('stock').push(payload);
+                }
+                setShowProductModal(false);
             };
 
             const handleUpdateQty = (id, currentQty, amount) => {
                 const newQty = currentQty + amount;
-                if(newQty >= 0) db.ref(`stock/${id}`).update({ quantite: newQty });
+                if (newQty >= 0) db.ref(`stock/${id}`).update({ quantite: newQty });
             };
 
-            const handleRemoveStock = (id) => {
-                if(confirm("Supprimer ce produit définitivement ?")) db.ref(`stock/${id}`).remove();
+            const handleOpenRestock = (item) => {
+                setRestockItem(item);
+                setRestockQty('');
+                setShowRestockModal(true);
+            };
+
+            const handleConfirmRestock = (e) => {
+                e.preventDefault();
+                const addQty = parseInt(restockQty, 10);
+                const nomValide = utilisateur.trim();
+                
+                if (!nomValide) return alert("🚨 Merci d'indiquer ton nom ou surnom avant de valider l'entrée.");
+
+                if (!isNaN(addQty) && addQty > 0 && restockItem) {
+                    localStorage.setItem('foyer_utilisateur', nomValide);
+                    const newTotal = (restockItem.quantite || 0) + addQty;
+                    db.ref(`stock/${restockItem.id}`).update({ quantite: newTotal });
+                    
+                    db.ref('historique').push({
+                        date: firebase.database.ServerValue.TIMESTAMP,
+                        type: 'entree',
+                        utilisateur: nomValide,
+                        articles: [{ id: restockItem.id, nom: restockItem.nom, quantite: addQty, format: restockItem.format }]
+                    });
+
+                    setShowRestockModal(false);
+                }
+            };
+
+            const handleRemoveStock = (id, nom) => {
+                if (confirm(`Supprimer définitivement "${nom}" du stock ?`)) db.ref(`stock/${id}`).remove();
+            };
+
+            const handleAddFamille = (e) => {
+                e.preventDefault();
+                const trimmed = newFamilleInput.trim();
+                if (!trimmed) return;
+                if (famillesList.some(f => f.nom.toLowerCase() === trimmed.toLowerCase())) return alert('Cette famille existe déjà.');
+                db.ref('familles').push({ nom: trimmed });
+                setNewFamilleInput('');
+            };
+
+            const handleDeleteFamille = (id, nom) => {
+                if (stockArray.some(item => item.famille === nom)) return alert(`Impossible : des articles sont encore rattachés à "${nom}".`);
+                if (confirm(`Supprimer la famille "${nom}" ?`)) {
+                    db.ref(`familles/${id}`).remove();
+                    if (selectedCategory === nom) setSelectedCategory('Toutes');
+                }
             };
 
             const handleAddFournisseur = () => {
-                const nom = prompt("Nom du fournisseur:");
-                if(nom) db.ref('fournisseurs').push({ nom, email: "", tel: "" });
+                const nom = prompt("Nom du fournisseur :");
+                if (nom) db.ref('fournisseurs').push({ nom, email: "", tel: "", siteWeb: "" });
             };
 
             const handleUpdateFournisseur = (id, field, value) => {
@@ -121,7 +268,7 @@
             };
 
             const handleRemoveFournisseur = (id) => {
-                if(confirm("Supprimer ce fournisseur du carnet d'adresses ?")) db.ref(`fournisseurs/${id}`).remove();
+                if (confirm("Supprimer ce fournisseur ?")) db.ref(`fournisseurs/${id}`).remove();
             };
 
             return (
@@ -129,88 +276,153 @@
                     <header class="bg-pompier-navy text-white shadow-lg border-b-4 border-pompier-red">
                         <div class="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
                             <div class="flex items-center space-x-4">
-                                <div class="bg-white p-1 rounded-xl">
-                                    <img src="./logo.png" alt="Ecusson CIS Rieumes" class="h-14 w-14 object-contain" />
+                                <div class="bg-white p-1 rounded-xl shadow">
+                                    <img src="./logo.png" alt="Écusson" class="h-14 w-14 object-contain" />
                                 </div>
                                 <div>
                                     <h1 class="text-2xl font-bold uppercase tracking-wider">Amicale SP Rieumes</h1>
                                     <p class="text-gray-300 text-sm">Gestion des stocks du Foyer</p>
                                 </div>
                             </div>
-                            <button 
-                                onClick={() => setShowOrderModal(true)}
-                                class={`px-4 py-2 rounded-lg font-bold flex items-center space-x-2 transition-colors ${itemsInAlert.length > 0 ? 'bg-pompier-red hover:bg-red-700 animate-pulse' : 'bg-gray-600 hover:bg-gray-500'}`}
-                            >
-                                <i class="fa-solid fa-shopping-cart"></i>
-                                <span>Commander</span>
-                                {itemsInAlert.length > 0 && (
-                                    <span class="bg-white text-pompier-red px-2 py-0.5 rounded-full text-sm">
-                                        {itemsInAlert.length}
-                                    </span>
+                            
+                            <div class="flex items-center space-x-2">
+                                {isAdmin && (
+                                    <button 
+                                        onClick={() => setShowOrderModal(true)}
+                                        class={`px-3 sm:px-4 py-2 rounded-lg font-bold flex items-center space-x-2 transition-colors ${itemsInAlert.length > 0 ? 'bg-pompier-red hover:bg-red-700 animate-pulse' : 'bg-gray-600 hover:bg-gray-500'}`}
+                                    >
+                                        <i class="fa-solid fa-cart-shopping"></i>
+                                        <span class="hidden sm:inline">Commander</span>
+                                        {itemsInAlert.length > 0 && (
+                                            <span class="bg-white text-pompier-red px-2 py-0.5 rounded-full text-sm font-bold">
+                                                {itemsInAlert.length}
+                                            </span>
+                                        )}
+                                    </button>
                                 )}
-                            </button>
+                                
+                                {!isAdmin ? (
+                                    <button onClick={() => setShowAdminLogin(true)} class="bg-gray-600 hover:bg-gray-500 text-white px-3 sm:px-4 py-2 rounded-lg font-bold flex items-center transition-colors" title="Connexion Bureau">
+                                        <i class="fa-solid fa-lock"></i>
+                                    </button>
+                                ) : (
+                                    <button onClick={handleAdminLogout} class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 sm:px-4 py-2 rounded-lg font-bold flex items-center transition-colors" title="Déconnexion Bureau">
+                                        <i class="fa-solid fa-lock-open"></i>
+                                    </button>
+                                )}
+                            </div>
                         </div>
-                        <div class="max-w-6xl mx-auto px-4 mt-2 flex space-x-2 overflow-x-auto">
-                            <button onClick={() => setActiveTab('sorties')} class={`px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'sorties' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
-                                <i class="fa-solid fa-arrow-right-from-bracket"></i><span>Gestion des sorties</span>
+
+                        {/* MENU DÉROULANT DES ONGLETS */}
+                        <div class="max-w-6xl mx-auto px-4 mt-2 flex space-x-1 sm:space-x-2 overflow-x-auto scrollbar-hide">
+                            <button onClick={() => setActiveTab('sorties')} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'sorties' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
+                                <i class="fa-solid fa-arrow-right-from-bracket"></i><span>Sorties</span>
                             </button>
-                            <button onClick={() => setActiveTab('stock')} class={`px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'stock' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
-                                <i class="fa-solid fa-box"></i><span>État des stocks</span>
-                            </button>
-                            <button onClick={() => setActiveTab('fournisseurs')} class={`px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'fournisseurs' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
-                                <i class="fa-solid fa-address-book"></i><span>Fournisseurs</span>
-                            </button>
+                            
+                            {isAdmin && (
+                                <>
+                                    <button onClick={() => setActiveTab('stock')} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'stock' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
+                                        <i class="fa-solid fa-boxes-stacked"></i><span>Stocks</span>
+                                    </button>
+                                    <button onClick={() => setActiveTab('historique')} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'historique' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
+                                        <i class="fa-solid fa-clock-rotate-left"></i><span>Historique</span>
+                                    </button>
+                                    <button onClick={() => setActiveTab('fournisseurs')} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'fournisseurs' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
+                                        <i class="fa-solid fa-address-book"></i><span class="hidden sm:inline">Fournisseurs</span>
+                                    </button>
+                                    <button onClick={() => setActiveTab('securite')} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'securite' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
+                                        <i class="fa-solid fa-shield-halved"></i><span class="hidden sm:inline">Sécurité</span>
+                                    </button>
+                                </>
+                            )}
                         </div>
                     </header>
 
                     <main class="max-w-6xl mx-auto px-4 py-8">
                         {activeTab === 'sorties' && (
-                            <SortiesTab stock={stockArray} onUpdateQty={handleUpdateQty} />
+                            <div>
+                                <div class="mb-4 flex items-center space-x-2 overflow-x-auto pb-2">
+                                    <span class="text-xs font-bold text-gray-500 uppercase mr-1">Famille :</span>
+                                    {availableCategories.map(cat => (
+                                        <button key={cat} onClick={() => setSelectedCategory(cat)} class={`px-3 py-1.5 rounded-full text-xs font-bold transition-all shrink-0 ${selectedCategory === cat ? 'bg-pompier-red text-white shadow' : 'bg-white text-gray-700 border hover:bg-gray-50'}`}>
+                                            {cat}
+                                        </button>
+                                    ))}
+                                </div>
+                                <SortiesTab stock={filteredStock} onUpdateQty={handleUpdateQty} db={db} utilisateur={utilisateur} setUtilisateur={setUtilisateur} />
+                            </div>
                         )}
 
-                        {activeTab === 'stock' && (
+                        {activeTab === 'stock' && isAdmin && (
                             <div>
-                                <div class="flex justify-between items-center mb-6">
-                                    <h2 class="text-2xl font-bold text-pompier-navy">Inventaire du Foyer</h2>
-                                    <button onClick={() => { setNewProduct({ nom: '', format: 'Pack', seuil: 5, fournisseurId: '' }); setShowAddModal(true); }} class="bg-pompier-navy text-white px-4 py-2 rounded shadow hover:bg-blue-900">
-                                        <i class="fa-solid fa-plus mr-2"></i> Ajouter
-                                    </button>
+                                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                                    <div>
+                                        <h2 class="text-2xl font-bold text-pompier-navy">Inventaire du Foyer</h2>
+                                    </div>
+                                    <div class="flex items-center space-x-2">
+                                        <button onClick={() => setShowManageFamillesModal(true)} class="bg-gray-200 hover:bg-gray-300 text-pompier-navy px-3 py-2.5 rounded-lg font-semibold text-sm flex items-center space-x-1.5 transition">
+                                            <i class="fa-solid fa-tags"></i><span>Familles</span>
+                                        </button>
+                                        <button onClick={handleOpenAddModal} class="bg-pompier-navy text-white px-4 py-2.5 rounded-lg shadow font-semibold hover:bg-blue-900 flex items-center space-x-2">
+                                            <i class="fa-solid fa-plus"></i><span>Produit</span>
+                                        </button>
+                                    </div>
                                 </div>
-                                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {stockArray.map(item => {
-                                        const isAlert = item.quantite <= item.seuil;
-                                        const isWarning = item.quantite <= item.seuil + 2 && !isAlert;
-                                        const statusColor = isAlert ? 'bg-red-100 border-red-500' : isWarning ? 'bg-orange-100 border-orange-500' : 'bg-white border-gray-200';
-                                        const fournisseurName = item.fournisseurId && fournisseurs[item.fournisseurId] ? fournisseurs[item.fournisseurId].nom : "Sans fournisseur";
 
+                                <div class="mb-6 flex items-center space-x-2 overflow-x-auto pb-2">
+                                    {availableCategories.map(cat => (
+                                        <button key={cat} onClick={() => setSelectedCategory(cat)} class={`px-3 py-1.5 rounded-full text-xs font-bold transition-all shrink-0 ${selectedCategory === cat ? 'bg-pompier-navy text-white shadow' : 'bg-white text-gray-700 border hover:bg-gray-50'}`}>
+                                            {cat} {cat === 'Toutes' ? `(${stockArray.length})` : `(${stockArray.filter(i => i.famille === cat).length})`}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                    {filteredStock.map(item => {
+                                        const isAlert = item.quantite <= item.seuil;
+                                        const statusBorder = isAlert ? 'border-red-500 bg-red-50/40' : 'border-gray-200 bg-white';
+                                        
                                         return (
-                                            <div key={item.id} class={`p-4 rounded-xl border-l-4 shadow-sm flex flex-col justify-between ${statusColor}`}>
+                                            <div key={item.id} class={`p-4 rounded-xl border-2 shadow-sm flex flex-col justify-between ${statusBorder}`}>
                                                 <div class="flex justify-between items-start">
-                                                    <div>
-                                                        <h3 class="font-bold text-lg">{item.nom}</h3>
-                                                        <p class="text-xs text-gray-500">{item.format} • {fournisseurName}</p>
+                                                    <div class="flex-1">
+                                                        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-pompier-navy uppercase tracking-wider">{item.famille}</span>
+                                                        {isAlert && <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-600 text-white uppercase ml-1">Alerte</span>}
+                                                        <h3 class="font-bold text-lg text-gray-900 mt-1">{item.nom}</h3>
+                                                        <p class="text-xs text-gray-500">{item.format}</p>
                                                     </div>
-                                                    <button onClick={() => handleRemoveStock(item.id)} class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
+                                                    <div class="flex space-x-1">
+                                                        <button onClick={() => handleOpenEditModal(item)} class="p-1.5 text-gray-400 hover:text-blue-600"><i class="fa-solid fa-pen-to-square"></i></button>
+                                                        <button onClick={() => handleRemoveStock(item.id, item.nom)} class="p-1.5 text-gray-400 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
+                                                    </div>
                                                 </div>
-                                                <div class="mt-4 flex items-center justify-between">
-                                                    <div class="text-sm"><span class="text-gray-500">Seuil: {item.seuil}</span></div>
-                                                    <div class="flex items-center space-x-3 bg-gray-100 rounded-lg p-1">
-                                                        <button onClick={() => handleUpdateQty(item.id, item.quantite, -1)} class="w-8 h-8 flex justify-center items-center bg-white rounded shadow text-pompier-navy hover:bg-gray-50"><i class="fa-solid fa-minus"></i></button>
-                                                        <span class="font-bold text-xl w-8 text-center">{item.quantite}</span>
-                                                        <button onClick={() => handleUpdateQty(item.id, item.quantite, 1)} class="w-8 h-8 flex justify-center items-center bg-pompier-navy rounded shadow text-white hover:bg-blue-900"><i class="fa-solid fa-plus"></i></button>
+
+                                                <div class="mt-4 pt-3 border-t border-gray-200 flex items-center justify-between">
+                                                    <div>
+                                                        <button onClick={() => handleOpenRestock(item)} class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5 rounded font-bold shadow-sm flex items-center space-x-1.5">
+                                                            <i class="fa-solid fa-arrow-down-to-bracket text-[10px]"></i><span>+ Entrée</span>
+                                                        </button>
+                                                    </div>
+                                                    <div class="bg-gray-50 rounded-lg px-3 py-1.5 border border-gray-200 flex flex-col items-center justify-center min-w-[3rem]">
+                                                        <span class="text-[9px] text-gray-500 uppercase font-bold leading-none mb-1">En stock</span>
+                                                        <span class="font-bold text-xl text-pompier-navy leading-none">{item.quantite}</span>
                                                     </div>
                                                 </div>
                                             </div>
-                                        )
+                                        );
                                     })}
                                 </div>
                             </div>
                         )}
 
-                        {activeTab === 'fournisseurs' && (
+                        {activeTab === 'historique' && isAdmin && (
+                            <HistoriqueTab db={db} CODE_PURGE={CODE_PURGE} isMaster={isMaster} />
+                        )}
+
+                        {activeTab === 'fournisseurs' && isAdmin && (
                             <div>
                                 <div class="flex justify-between items-center mb-6">
-                                    <h2 class="text-2xl font-bold text-pompier-navy">Carnet d'adresses</h2>
+                                    <h2 class="text-2xl font-bold text-pompier-navy">Fournisseurs</h2>
                                     <button onClick={handleAddFournisseur} class="bg-pompier-navy text-white px-4 py-2 rounded shadow hover:bg-blue-900">
                                         <i class="fa-solid fa-plus mr-2"></i> Ajouter
                                     </button>
@@ -218,19 +430,19 @@
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     {Object.entries(fournisseurs).map(([id, f]) => (
                                         <div key={id} class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 relative group">
-                                            <button onClick={() => handleRemoveFournisseur(id)} class="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors">
-                                                <i class="fa-solid fa-trash"></i>
-                                            </button>
-                                            
+                                            <button onClick={() => handleRemoveFournisseur(id)} class="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors"><i class="fa-solid fa-trash"></i></button>
                                             <h3 class="font-bold text-lg mb-3 text-pompier-navy pr-8">{f.nom}</h3>
                                             <div class="space-y-2">
+                                                <div class="flex items-center"><i class="fa-solid fa-envelope w-6 text-gray-400"></i><input type="email" placeholder="Email" value={f.email} onChange={(e) => handleUpdateFournisseur(id, 'email', e.target.value)} class="flex-1 bg-gray-50 border rounded px-2 py-1 text-sm outline-none focus:border-pompier-red"/></div>
+                                                <div class="flex items-center"><i class="fa-solid fa-phone w-6 text-gray-400"></i><input type="tel" placeholder="Téléphone" value={f.tel} onChange={(e) => handleUpdateFournisseur(id, 'tel', e.target.value)} class="flex-1 bg-gray-50 border rounded px-2 py-1 text-sm outline-none focus:border-pompier-red"/></div>
                                                 <div class="flex items-center">
-                                                    <i class="fa-solid fa-envelope w-6 text-gray-400"></i>
-                                                    <input type="email" placeholder="Email de commande" value={f.email} onChange={(e) => handleUpdateFournisseur(id, 'email', e.target.value)} class="flex-1 bg-gray-50 border rounded px-2 py-1 text-sm outline-none focus:border-pompier-red"/>
-                                                </div>
-                                                <div class="flex items-center">
-                                                    <i class="fa-solid fa-phone w-6 text-gray-400"></i>
-                                                    <input type="tel" placeholder="Téléphone pour SMS" value={f.tel} onChange={(e) => handleUpdateFournisseur(id, 'tel', e.target.value)} class="flex-1 bg-gray-50 border rounded px-2 py-1 text-sm outline-none focus:border-pompier-red"/>
+                                                    <i class="fa-solid fa-globe w-6 text-gray-400"></i>
+                                                    <input type="url" placeholder="Site web (https://...)" value={f.siteWeb || ''} onChange={(e) => handleUpdateFournisseur(id, 'siteWeb', e.target.value)} class="flex-1 bg-gray-50 border rounded px-2 py-1 text-sm outline-none focus:border-pompier-red"/>
+                                                    {f.siteWeb && (
+                                                        <a href={f.siteWeb.startsWith('http') ? f.siteWeb : `https://${f.siteWeb}`} target="_blank" rel="noopener noreferrer" class="ml-2 text-pompier-navy hover:text-blue-600 transition-colors" title="Visiter le site">
+                                                            <i class="fa-solid fa-arrow-up-right-from-square text-lg"></i>
+                                                        </a>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>
@@ -238,66 +450,172 @@
                                 </div>
                             </div>
                         )}
+
+                        {activeTab === 'securite' && isAdmin && (
+                            <SecuriteTab db={db} codesBureau={codesBureau} CODE_PURGE={CODE_PURGE} isMaster={isMaster} />
+                        )}
                     </main>
 
-                    {/* MODALE D'AJOUT DE PRODUIT */}
-                    {showAddModal && (
+                    {/* MODALE CONNEXION BUREAU */}
+                    {showAdminLogin && (
                         <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
-                            <div class="bg-white rounded-xl shadow-2xl max-w-md w-full">
-                                <div class="bg-pompier-navy text-white px-6 py-4 rounded-t-xl flex justify-between items-center">
-                                    <h2 class="text-xl font-bold">Nouveau Produit</h2>
-                                    <button onClick={() => setShowAddModal(false)} class="text-white hover:text-gray-200"><i class="fa-solid fa-times text-xl"></i></button>
+                            <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden">
+                                <div class="bg-pompier-navy text-white px-5 py-4 flex justify-between items-center">
+                                    <h2 class="text-lg font-bold"><i class="fa-solid fa-lock mr-2"></i>Accès Bureau</h2>
+                                    <button onClick={() => {setShowAdminLogin(false); setAdminPin('');}} class="text-white hover:text-gray-200"><i class="fa-solid fa-times text-xl"></i></button>
+                                </div>
+                                <form onSubmit={handleAdminLogin} class="p-6 space-y-5">
+                                    <p class="text-sm text-gray-600 text-center">Saisis ton code PIN ou le code Maître pour accéder à la gestion complète.</p>
+                                    <div>
+                                        <input 
+                                            autoFocus
+                                            required 
+                                            type="password" 
+                                            pattern="[0-9]*"
+                                            inputMode="numeric"
+                                            maxLength="4"
+                                            placeholder="Code à 4 chiffres"
+                                            value={adminPin} 
+                                            onChange={e => setAdminPin(e.target.value)} 
+                                            class="w-full border-2 border-pompier-navy rounded-lg p-3 text-2xl font-bold text-center outline-none tracking-[0.5em] focus:ring-2 focus:ring-blue-400" 
+                                        />
+                                    </div>
+                                    <button type="submit" class="w-full bg-pompier-navy hover:bg-blue-900 text-white font-bold py-3 rounded-lg shadow-md transition-colors">Déverrouiller</button>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* MODALES PRODUITS & FAMILLES (isAdmin) */}
+                    {showProductModal && editingProduct && isAdmin && (
+                        <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
+                            <div class="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
+                                <div class="bg-pompier-navy text-white px-6 py-4 flex justify-between items-center">
+                                    <h2 class="text-xl font-bold">{editingProduct.id ? 'Modifier le produit' : 'Nouveau Produit'}</h2>
+                                    <button onClick={() => setShowProductModal(false)} class="text-white"><i class="fa-solid fa-times text-xl"></i></button>
                                 </div>
                                 <form onSubmit={handleSaveProduct} class="p-6 space-y-4">
                                     <div>
-                                        <label class="block text-sm font-bold mb-1 text-gray-700">Nom de l'article</label>
-                                        <input required type="text" value={newProduct.nom} onChange={e => setNewProduct({...newProduct, nom: e.target.value})} class="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-pompier-red outline-none" placeholder="ex: Jus d'orange" />
+                                        <label class="block text-sm font-bold mb-1">Nom *</label>
+                                        <input required type="text" value={editingProduct.nom} onChange={e => setEditingProduct({...editingProduct, nom: e.target.value})} class="w-full border rounded p-2 outline-none" />
                                     </div>
-                                    <div class="flex space-x-4">
+                                    <div class="flex space-x-3">
                                         <div class="flex-1">
-                                            <label class="block text-sm font-bold mb-1 text-gray-700">Format</label>
-                                            <input required type="text" value={newProduct.format} onChange={e => setNewProduct({...newProduct, format: e.target.value})} class="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-pompier-red outline-none" placeholder="ex: Pack" />
+                                            <label class="block text-sm font-bold mb-1">Famille *</label>
+                                            <select required value={editingProduct.famille} onChange={e => setEditingProduct({...editingProduct, famille: e.target.value})} class="w-full border rounded p-2 bg-white font-semibold">
+                                                {famillesList.map(f => <option key={f.id} value={f.nom}>{f.nom}</option>)}
+                                            </select>
                                         </div>
                                         <div class="flex-1">
-                                            <label class="block text-sm font-bold mb-1 text-gray-700">Seuil d'alerte</label>
-                                            <input required type="number" min="0" value={newProduct.seuil} onChange={e => setNewProduct({...newProduct, seuil: parseInt(e.target.value)})} class="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-pompier-red outline-none" />
+                                            <label class="block text-sm font-bold mb-1">Format</label>
+                                            <input required type="text" value={editingProduct.format} onChange={e => setEditingProduct({...editingProduct, format: e.target.value})} class="w-full border rounded p-2 outline-none" />
                                         </div>
+                                    </div>
+                                    <div class="flex space-x-3">
+                                        <div class="flex-1">
+                                            <label class="block text-sm font-bold mb-1">Seuil d'alerte</label>
+                                            <input required type="number" min="0" value={editingProduct.seuil} onChange={e => setEditingProduct({...editingProduct, seuil: e.target.value})} class="w-full border rounded p-2 outline-none" />
+                                        </div>
+                                        {!editingProduct.id && (
+                                            <div class="flex-1">
+                                                <label class="block text-sm font-bold mb-1">Stock initial</label>
+                                                <input required type="number" min="0" value={editingProduct.quantite} onChange={e => setEditingProduct({...editingProduct, quantite: e.target.value})} class="w-full border rounded p-2 outline-none" />
+                                            </div>
+                                        )}
                                     </div>
                                     <div>
-                                        <label class="block text-sm font-bold mb-1 text-gray-700">Fournisseur</label>
-                                        <select value={newProduct.fournisseurId} onChange={e => setNewProduct({...newProduct, fournisseurId: e.target.value})} class="w-full border border-gray-300 rounded p-2 focus:ring-2 focus:ring-pompier-red outline-none bg-white">
-                                            <option value="">-- Sans fournisseur --</option>
-                                            {Object.entries(fournisseurs).map(([fId, f]) => (
-                                                <option key={fId} value={fId}>{f.nom}</option>
-                                            ))}
+                                        <label class="block text-sm font-bold mb-1">Fournisseur attitré</label>
+                                        <select value={editingProduct.fournisseurId} onChange={e => setEditingProduct({...editingProduct, fournisseurId: e.target.value})} class="w-full border rounded p-2 bg-white">
+                                            <option value="">-- Aucun --</option>
+                                            {Object.entries(fournisseurs).map(([fId, f]) => <option key={fId} value={fId}>{f.nom}</option>)}
                                         </select>
                                     </div>
                                     <div class="pt-4">
-                                        <button type="submit" class="w-full bg-pompier-red text-white font-bold py-3 rounded-lg hover:bg-red-700 shadow-md transition-colors">
-                                            <i class="fa-solid fa-check mr-2"></i> Ajouter au stock
-                                        </button>
+                                        <button type="submit" class="w-full bg-pompier-red text-white font-bold py-3 rounded-lg shadow-md"><i class="fa-solid fa-check mr-2"></i>Valider</button>
                                     </div>
                                 </form>
                             </div>
                         </div>
                     )}
 
-                    {/* MODALE DE COMMANDE */}
-                    {showOrderModal && (
-                        <OrderModal 
-                            onClose={() => setShowOrderModal(false)} 
-                            stock={stockArray} 
-                            fournisseurs={fournisseurs} 
-                        />
+                    {showManageFamillesModal && isAdmin && (
+                        <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
+                            <div class="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
+                                <div class="bg-pompier-navy text-white px-5 py-4 flex justify-between items-center">
+                                    <h2 class="text-lg font-bold"><i class="fa-solid fa-tags mr-2"></i>Gérer les Familles</h2>
+                                    <button onClick={() => setShowManageFamillesModal(false)} class="text-white"><i class="fa-solid fa-times text-xl"></i></button>
+                                </div>
+                                <div class="p-5 space-y-4">
+                                    <form onSubmit={handleAddFamille} class="flex space-x-2">
+                                        <input required type="text" placeholder="Nouvelle famille..." value={newFamilleInput} onChange={e => setNewFamilleInput(e.target.value)} class="flex-1 border rounded-lg px-3 py-2 text-sm outline-none" />
+                                        <button type="submit" class="bg-pompier-navy text-white px-4 py-2 rounded-lg font-bold text-sm"><i class="fa-solid fa-plus mr-1"></i>Créer</button>
+                                    </form>
+                                    <div class="divide-y max-h-60 overflow-y-auto border rounded-lg">
+                                        {famillesList.map(fam => {
+                                            const count = stockArray.filter(i => i.famille === fam.nom).length;
+                                            return (
+                                                <div key={fam.id} class="flex justify-between items-center p-3 hover:bg-gray-50">
+                                                    <div>
+                                                        <span class="font-bold text-pompier-navy">{fam.nom}</span>
+                                                        <span class="text-xs text-gray-400 block">{count} produit(s)</span>
+                                                    </div>
+                                                    <button onClick={() => handleDeleteFamille(fam.id, fam.nom)} class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     )}
+
+                    {/* MODALE ENTRÉE DE STOCK */}
+                    {showRestockModal && restockItem && isAdmin && (
+                        <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
+                            <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden">
+                                <div class="bg-emerald-600 text-white px-5 py-4 flex justify-between items-center">
+                                    <h2 class="text-lg font-bold"><i class="fa-solid fa-arrow-down-to-bracket mr-2"></i>Entrée de stock</h2>
+                                    <button onClick={() => setShowRestockModal(false)} class="text-white"><i class="fa-solid fa-times"></i></button>
+                                </div>
+                                <form onSubmit={handleConfirmRestock} class="p-5 space-y-4">
+                                    <div>
+                                        <h3 class="text-lg font-bold text-pompier-navy">{restockItem.nom}</h3>
+                                        <p class="text-xs text-gray-400">Stock actuel : {restockItem.quantite} ({restockItem.format})</p>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-bold mb-2">Quantité à ajouter :</label>
+                                        <input autoFocus required type="number" min="1" value={restockQty} onChange={e => setRestockQty(e.target.value)} class="w-full border-2 border-emerald-500 rounded-lg p-2.5 text-xl font-bold text-center outline-none focus:ring-2 focus:ring-emerald-300" />
+                                    </div>
+                                    <div class="pt-2 border-t border-gray-100">
+                                        <label class="block text-sm font-bold text-gray-700 mb-2">Qui fait cette entrée ?</label>
+                                        <div class="flex items-center bg-gray-50 border rounded-lg px-3 py-2 focus-within:ring-2 ring-emerald-400">
+                                            <i class="fa-solid fa-user text-gray-400 mr-2"></i>
+                                            <input 
+                                                type="text" 
+                                                placeholder="Ton nom / surnom..." 
+                                                value={utilisateur}
+                                                onChange={e => setUtilisateur(e.target.value)}
+                                                class="bg-transparent outline-none flex-1 text-sm font-semibold text-pompier-navy"
+                                            />
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg shadow transition-colors">
+                                        Valider la rentrée
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
+                    {showOrderModal && isAdmin && <OrderModal onClose={() => setShowOrderModal(false)} stock={stockArray} fournisseurs={fournisseurs} />}
                 </div>
             );
         }
 
-        // =================================================================
-        // COMPOSANT: ONGLET GESTION DES SORTIES DE STOCK
-        // =================================================================
-        function SortiesTab({ stock, onUpdateQty }) {
+        // ==========================================
+        // COMPOSANT ONGLET : GESTION DES SORTIES (PUBLIC)
+        // ==========================================
+        function SortiesTab({ stock, onUpdateQty, db, utilisateur, setUtilisateur }) {
             const [cart, setCart] = useState({});
 
             const handleCartChange = (id, delta, maxStock) => {
@@ -305,71 +623,63 @@
                     const current = prev[id] || 0;
                     const next = Math.max(0, current + delta);
                     if (next > maxStock) return prev;
-                    if (next === 0) {
-                        const copy = { ...prev };
-                        delete copy[id];
-                        return copy;
-                    }
+                    if (next === 0) { const copy = { ...prev }; delete copy[id]; return copy; }
                     return { ...prev, [id]: next };
                 });
             };
 
             const confirmValidation = () => {
                 if (Object.keys(cart).length === 0) return;
-                
+                if (!utilisateur.trim()) return alert("🚨 Merci d'indiquer ton nom ou surnom avant de valider la sortie.");
+
+                localStorage.setItem('foyer_utilisateur', utilisateur.trim());
+                const articlesSortis = [];
+
                 Object.entries(cart).forEach(([id, qtyToRemove]) => {
                     const item = stock.find(i => i.id === id);
                     if (item) {
                         onUpdateQty(id, item.quantite, -qtyToRemove);
+                        articlesSortis.push({ id, nom: item.nom, quantite: qtyToRemove, format: item.format });
                     }
                 });
 
+                db.ref('historique').push({
+                    date: firebase.database.ServerValue.TIMESTAMP,
+                    type: 'sortie',
+                    utilisateur: utilisateur.trim(),
+                    articles: articlesSortis
+                });
+
                 setCart({});
-                alert("Sorties enregistrées avec succès ! Le stock a été mis à jour.");
+                alert("Sorties enregistrées avec succès !");
             };
 
             const totalItemsCount = Object.values(cart).reduce((a, b) => a + b, 0);
 
             return (
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* Liste des produits à sortir */}
                     <div class="lg:col-span-2 space-y-4">
                         <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                            <h2 class="text-xl font-bold text-pompier-navy mb-2"><i class="fa-solid fa-arrow-right-from-bracket mr-2"></i> Enregistrer des sorties de stock</h2>
-                            <p class="text-sm text-gray-500 mb-4">Sélectionne les quantités sorties du foyer (garde, manœuvre, permanence) pour mettre à jour l'inventaire.</p>
-
+                            <h2 class="text-xl font-bold text-pompier-navy mb-4"><i class="fa-solid fa-arrow-right-from-bracket mr-2"></i> Articles sortis du foyer</h2>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 {stock.map(item => {
                                     const qtyInCart = cart[item.id] || 0;
                                     const remainingStock = item.quantite - qtyInCart;
-
                                     return (
                                         <div key={item.id} class="bg-gray-50 border rounded-xl p-3 flex flex-col justify-between">
                                             <div class="flex justify-between items-start mb-2">
                                                 <div>
                                                     <h3 class="font-bold text-pompier-navy">{item.nom}</h3>
-                                                    <span class="text-xs text-gray-500">Stock dispo : <strong class={remainingStock <= item.seuil ? "text-red-600 font-bold" : ""}>{remainingStock}</strong></span>
+                                                    <span class="text-xs text-gray-500">Stock dispo : <strong class={remainingStock <= item.seuil ? "text-red-600" : ""}>{remainingStock}</strong></span>
                                                 </div>
                                                 <span class="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded">{item.format}</span>
                                             </div>
-
                                             <div class="flex items-center justify-between mt-2 pt-2 border-t border-gray-200">
-                                                <span class="text-xs font-semibold text-gray-600">Quantité sortie :</span>
+                                                <span class="text-xs font-semibold text-gray-600">Quantité :</span>
                                                 <div class="flex items-center space-x-2 bg-white border rounded px-2 py-1 shadow-sm">
-                                                    <button 
-                                                        onClick={() => handleCartChange(item.id, -1, item.quantite)} 
-                                                        class="w-7 h-7 flex items-center justify-center text-gray-600 hover:text-pompier-red rounded"
-                                                    >
-                                                        <i class="fa-solid fa-minus text-xs"></i>
-                                                    </button>
+                                                    <button onClick={() => handleCartChange(item.id, -1, item.quantite)} class="w-7 h-7 flex items-center justify-center text-gray-600 hover:text-pompier-red rounded"><i class="fa-solid fa-minus text-xs"></i></button>
                                                     <span class="w-6 text-center font-bold text-pompier-navy">{qtyInCart}</span>
-                                                    <button 
-                                                        onClick={() => handleCartChange(item.id, 1, item.quantite)} 
-                                                        class={`w-7 h-7 flex items-center justify-center rounded text-white ${remainingStock > 0 ? 'bg-pompier-navy hover:bg-blue-900' : 'bg-gray-300 cursor-not-allowed'}`}
-                                                        disabled={remainingStock <= 0}
-                                                    >
-                                                        <i class="fa-solid fa-plus text-xs"></i>
-                                                    </button>
+                                                    <button onClick={() => handleCartChange(item.id, 1, item.quantite)} class={`w-7 h-7 flex items-center justify-center rounded text-white ${remainingStock > 0 ? 'bg-pompier-navy hover:bg-blue-900' : 'bg-gray-300 cursor-not-allowed'}`} disabled={remainingStock <= 0}><i class="fa-solid fa-plus text-xs"></i></button>
                                                 </div>
                                             </div>
                                         </div>
@@ -379,46 +689,40 @@
                         </div>
                     </div>
 
-                    {/* Panneau récapitulatif des sorties */}
                     <div class="lg:col-span-1">
                         <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 sticky top-4">
                             <h3 class="font-bold text-lg text-pompier-navy mb-3 flex items-center justify-between">
-                                <span><i class="fa-solid fa-list-check mr-2"></i> Sortie en cours</span>
+                                <span><i class="fa-solid fa-list-check mr-2"></i> Validation</span>
                                 <span class="bg-pompier-red text-white text-xs px-2 py-1 rounded-full">{totalItemsCount} art.</span>
                             </h3>
-
-                            {Object.keys(cart).length === 0 ? (
-                                <p class="text-sm text-gray-400 italic py-6 text-center">Aucun article sélectionné.</p>
-                            ) : (
-                                <div class="space-y-3 mb-6 max-h-60 overflow-y-auto pr-1">
-                                    {Object.entries(cart).map(([id, qty]) => {
-                                        const item = stock.find(i => i.id === id);
-                                        if (!item) return null;
-                                        return (
-                                            <div key={id} class="flex justify-between items-center text-sm border-b pb-2">
-                                                <div>
-                                                    <span class="font-semibold">{item.nom}</span>
-                                                    <span class="text-xs text-gray-400 block">{item.format}</span>
-                                                </div>
-                                                <div class="flex items-center space-x-2">
-                                                    <span class="font-bold text-pompier-red">-{qty}</span>
-                                                    <button onClick={() => handleCartChange(id, -qty, item.quantite)} class="text-gray-400 hover:text-red-600">
-                                                        <i class="fa-solid fa-trash text-xs"></i>
-                                                    </button>
-                                                </div>
+                            <div class="space-y-3 mb-4 max-h-60 overflow-y-auto pr-1">
+                                {Object.entries(cart).map(([id, qty]) => {
+                                    const item = stock.find(i => i.id === id);
+                                    if (!item) return null;
+                                    return (
+                                        <div key={id} class="flex justify-between items-center text-sm border-b pb-2">
+                                            <div>
+                                                <span class="font-semibold">{item.nom}</span>
+                                                <span class="text-xs text-gray-400 block">{item.format}</span>
                                             </div>
-                                        );
-                                    })}
+                                            <div class="flex items-center space-x-2">
+                                                <span class="font-bold text-pompier-red">-{qty}</span>
+                                                <button onClick={() => handleCartChange(id, -qty, item.quantite)} class="text-gray-400 hover:text-red-600"><i class="fa-solid fa-trash text-xs"></i></button>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                                {Object.keys(cart).length === 0 && <p class="text-sm text-gray-400 italic text-center py-4">Panier de sortie vide.</p>}
+                            </div>
+                            <div class="mt-4 pt-4 border-t border-gray-200 mb-4">
+                                <label class="block text-sm font-bold text-pompier-navy mb-2">Qui enregistre cette sortie ?</label>
+                                <div class="flex items-center bg-gray-50 border rounded-lg px-3 py-2 focus-within:ring-2 ring-pompier-red">
+                                    <i class="fa-solid fa-user text-gray-400 mr-2"></i>
+                                    <input type="text" placeholder="Ton nom / surnom..." value={utilisateur} onChange={e => setUtilisateur(e.target.value)} class="bg-transparent outline-none flex-1 text-sm font-semibold text-pompier-navy" />
                                 </div>
-                            )}
-
-                            <button 
-                                onClick={confirmValidation}
-                                class={`w-full py-3 rounded-lg font-bold shadow transition-colors flex items-center justify-center space-x-2 ${totalItemsCount > 0 ? 'bg-pompier-red text-white hover:bg-red-700' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
-                                disabled={totalItemsCount === 0}
-                            >
-                                <i class="fa-solid fa-check"></i>
-                                <span>Valider et déduire du stock</span>
+                            </div>
+                            <button onClick={confirmValidation} class={`w-full py-3 rounded-lg font-bold shadow transition-colors flex items-center justify-center space-x-2 ${totalItemsCount > 0 ? 'bg-pompier-red text-white hover:bg-red-700' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`} disabled={totalItemsCount === 0}>
+                                <i class="fa-solid fa-check"></i><span>Valider la sortie</span>
                             </button>
                         </div>
                     </div>
@@ -426,25 +730,236 @@
             );
         }
 
-        // =================================================================
-        // COMPOSANT: MODALE DE COMMANDE
-        // =================================================================
+        // ==========================================
+        // COMPOSANT ONGLET : HISTORIQUE
+        // ==========================================
+        function HistoriqueTab({ db, CODE_PURGE, isMaster }) {
+            const [logs, setLogs] = useState([]);
+            const [showPinPrompt, setShowPinPrompt] = useState(false);
+            const [pinCode, setPinCode] = useState('');
+            
+            useEffect(() => {
+                const ref = db.ref('historique').orderByChild('date').limitToLast(50);
+                ref.on('value', snap => {
+                    const data = snap.val();
+                    if(data) {
+                        const logArray = Object.entries(data).map(([id, val]) => ({ id, ...val })).reverse();
+                        setLogs(logArray);
+                    } else {
+                        setLogs([]);
+                    }
+                });
+                return () => ref.off();
+            }, []);
+
+            const handleVerifyPinAndClear = (e) => {
+                e.preventDefault();
+                if (pinCode === CODE_PURGE) {
+                    if(confirm("Action irréversible. Es-tu sûr de vouloir vider tout l'historique ?")) {
+                        db.ref('historique').remove();
+                        setShowPinPrompt(false);
+                        setPinCode('');
+                        alert("Historique effacé avec succès !");
+                    }
+                } else {
+                    alert("Code de purge incorrect. L'historique n'a pas été effacé.");
+                    setPinCode('');
+                }
+            };
+
+            return (
+                <div class="max-w-3xl mx-auto relative">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-2xl font-bold text-pompier-navy">Journal des mouvements</h2>
+                        
+                        {/* Le bouton Vider n'apparaît QUE pour le profil Maître */}
+                        {logs.length > 0 && isMaster && (
+                            <button onClick={() => {setShowPinPrompt(true); setPinCode('');}} class="text-xs bg-red-100 text-red-600 hover:bg-red-200 px-3 py-1.5 rounded-lg font-bold transition flex items-center space-x-1 shadow-sm">
+                                <i class="fa-solid fa-trash-can"></i><span>Vider</span>
+                            </button>
+                        )}
+                    </div>
+
+                    {logs.length === 0 ? (
+                        <p class="text-center text-gray-500 py-8 bg-white rounded-xl shadow-sm">Aucun historique pour le moment.</p>
+                    ) : (
+                        <div class="space-y-4">
+                            {logs.map(log => (
+                                <div key={log.id} class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-gray-200" style={{ borderLeftColor: log.type === 'sortie' ? '#e3001b' : '#059669' }}>
+                                    <div class="flex justify-between items-start mb-3">
+                                        <div><span class="font-bold text-gray-800 text-lg"><i class="fa-solid fa-user-pen text-gray-400 mr-2 text-sm"></i>{log.utilisateur}</span></div>
+                                        <div class="text-right">
+                                            <div class="text-xs text-gray-500 font-semibold mb-1">{new Date(log.date).toLocaleString('fr-FR', {day: '2-digit', month: 'short', hour: '2-digit', minute:'2-digit'})}</div>
+                                            <span class={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${log.type === 'sortie' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                                {log.type === 'sortie' ? 'Sortie' : 'Entrée'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <ul class="text-sm space-y-1.5 bg-gray-50 p-3 rounded-lg border border-gray-100">
+                                        {log.articles && log.articles.map((art, idx) => (
+                                            <li key={idx} class="flex justify-between items-center">
+                                                <span>{art.nom} <span class="text-gray-400 text-xs ml-1">({art.format})</span></span>
+                                                <span class={`font-bold ${log.type === 'sortie' ? 'text-red-600' : 'text-emerald-600'}`}>{log.type === 'sortie' ? '-' : '+'}{art.quantite}</span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    
+                    {/* MODALE PIN PURGE */}
+                    {showPinPrompt && isMaster && (
+                        <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
+                            <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden">
+                                <div class="bg-red-600 text-white px-5 py-4 flex justify-between items-center">
+                                    <h2 class="text-lg font-bold"><i class="fa-solid fa-lock mr-2"></i>Purge de l'historique</h2>
+                                    <button onClick={() => setShowPinPrompt(false)} class="text-white hover:text-red-200"><i class="fa-solid fa-times text-xl"></i></button>
+                                </div>
+                                <form onSubmit={handleVerifyPinAndClear} class="p-6 space-y-5">
+                                    <p class="text-sm text-gray-600 text-center">Saisis le code secret Maître (Purge) pour effacer définitivement ce journal.</p>
+                                    <div><input autoFocus required type="password" pattern="[0-9]*" inputMode="numeric" maxLength="4" placeholder="Code à 4 chiffres" value={pinCode} onChange={e => setPinCode(e.target.value)} class="w-full border-2 border-red-500 rounded-lg p-3 text-2xl font-bold text-center outline-none tracking-[0.5em] focus:ring-2 focus:ring-red-400" /></div>
+                                    <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg shadow-md transition-colors">Valider et Effacer</button>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )
+        }
+
+        // ==========================================
+        // COMPOSANT ONGLET : GESTION DES CODES PIN BUREAU
+        // ==========================================
+        function SecuriteTab({ db, codesBureau, CODE_PURGE, isMaster }) {
+            const [newNom, setNewNom] = useState('');
+            const [newPin, setNewPin] = useState('');
+
+            const handleAddCode = (e) => {
+                e.preventDefault();
+                const trimmedPin = newPin.trim();
+                if (trimmedPin.length !== 4) return alert("Le code PIN doit comporter exactement 4 chiffres.");
+                if (trimmedPin === CODE_PURGE) return alert("Ce code est réservé au Code Maître (Purge). Choisissez un autre code.");
+                
+                const exists = Object.values(codesBureau).some(c => c.pin === trimmedPin);
+                if (exists) return alert("Ce code PIN existe déjà dans la liste.");
+
+                db.ref('parametres/codesBureau').push({
+                    nom: newNom.trim(),
+                    pin: trimmedPin
+                });
+                
+                alert(`Le code d'accès Bureau pour "${newNom}" a été créé avec succès.`);
+                setNewNom('');
+                setNewPin('');
+            };
+
+            const handleDeleteCode = (id, nom) => {
+                const totalCodes = Object.keys(codesBureau).length;
+                if (totalCodes <= 1) return alert("Vous ne pouvez pas supprimer le dernier code d'accès au Bureau !");
+                if (confirm(`Supprimer l'accès Bureau pour "${nom}" ?`)) {
+                    db.ref(`parametres/codesBureau/${id}`).remove();
+                }
+            };
+
+            return (
+                <div class="max-w-4xl mx-auto">
+                    <div class="mb-6">
+                        <h2 class="text-2xl font-bold text-pompier-navy">Sécurité et Accès Bureau</h2>
+                        <p class="text-sm text-gray-500 mt-1">
+                            {isMaster ? "Tu es connecté avec le Code Maître. Tu peux gérer l'intégralité des accès au Bureau." : "Tu es connecté en mode Bureau standard. Tu peux créer ton propre code de connexion."}
+                        </p>
+                    </div>
+
+                    <div class={`grid grid-cols-1 ${isMaster ? 'md:grid-cols-3' : 'max-w-md mx-auto'} gap-6`}>
+                        {/* Formulaire d'ajout - VISIBLE PAR TOUS LES MEMBRES DU BUREAU */}
+                        <div class="md:col-span-1 bg-white p-5 rounded-xl shadow-sm border border-gray-200 self-start">
+                            <h3 class="font-bold text-lg text-pompier-navy mb-4"><i class="fa-solid fa-key mr-2"></i>Nouveau code</h3>
+                            <form onSubmit={handleAddCode} class="space-y-4">
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-600 mb-1">Nom / Fonction</label>
+                                    <input required type="text" placeholder="ex: Président, Trésorier, Cédric..." value={newNom} onChange={e => setNewNom(e.target.value)} class="w-full border rounded-lg p-2 text-sm outline-none focus:border-pompier-navy" />
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-600 mb-1">Nouveau Code PIN (4 chiffres)</label>
+                                    <input required type="password" pattern="[0-9]*" inputMode="numeric" maxLength="4" placeholder="****" value={newPin} onChange={e => setNewPin(e.target.value)} class="w-full border rounded-lg p-2 text-center text-lg font-bold tracking-[0.2em] outline-none focus:border-pompier-navy" />
+                                </div>
+                                <button type="submit" class="w-full bg-pompier-navy hover:bg-blue-900 text-white font-bold py-2 rounded-lg transition-colors text-sm shadow-sm">
+                                    <i class="fa-solid fa-plus mr-1"></i> Créer ce code
+                                </button>
+                            </form>
+                        </div>
+
+                        {/* Message d'information pour le bureau standard */}
+                        {!isMaster && (
+                            <div class="mt-2 p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-pompier-navy flex items-start space-x-3">
+                                <i class="fa-solid fa-circle-info mt-0.5 text-blue-500 text-lg"></i>
+                                <div>
+                                    <p class="font-bold mb-1">Affichage sécurisé</p>
+                                    <p>Pour des raisons de sécurité, la liste des codes existants et leur suppression sont réservées au détenteur du Code Maître.</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Liste des codes - VISIBLE UNIQUEMENT PAR LE MASTER */}
+                        {isMaster && (
+                            <div class="md:col-span-2 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                                <div class="bg-gray-50 px-5 py-3 border-b border-gray-200">
+                                    <h3 class="font-bold text-gray-700">Codes actuellement autorisés</h3>
+                                </div>
+                                <div class="divide-y divide-gray-100">
+                                    {Object.entries(codesBureau).map(([id, data]) => (
+                                        <div key={id} class="flex justify-between items-center px-5 py-4 hover:bg-gray-50">
+                                            <div class="flex items-center space-x-3">
+                                                <div class="w-10 h-10 rounded-full bg-blue-100 text-pompier-navy flex items-center justify-center font-bold text-xl">
+                                                    <i class="fa-solid fa-user-shield text-sm"></i>
+                                                </div>
+                                                <div>
+                                                    <p class="font-bold text-gray-800">{data.nom}</p>
+                                                    <p class="text-xs text-gray-500 font-mono">PIN: {data.pin}</p>
+                                                </div>
+                                            </div>
+                                            <button onClick={() => handleDeleteCode(id, data.nom)} class="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors" title="Supprimer ce code">
+                                                <i class="fa-solid fa-trash"></i>
+                                            </button>
+                                        </div>
+                                    ))}
+
+                                    {/* Affiche le code maître fixe pour info (impossible à supprimer ici) */}
+                                    <div class="flex justify-between items-center px-5 py-4 bg-gray-50 border-t-2 border-gray-200 opacity-60">
+                                        <div class="flex items-center space-x-3">
+                                            <div class="w-10 h-10 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center font-bold text-xl">
+                                                <i class="fa-solid fa-crown text-sm"></i>
+                                            </div>
+                                            <div>
+                                                <p class="font-bold text-gray-700">Code Maître & Purge</p>
+                                                <p class="text-xs text-gray-500 italic">Codé en dur dans l'application</p>
+                                            </div>
+                                        </div>
+                                        <div class="text-xs text-gray-400 px-2"><i class="fa-solid fa-lock"></i></div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // ==========================================
+        // COMPOSANT MODALE : PRÉPARATION COMMANDE
+        // ==========================================
         function OrderModal({ onClose, stock, fournisseurs }) {
             const [orderQties, setOrderQties] = useState({});
-            
             const toOrder = stock.filter(item => item.quantite <= item.seuil);
             
             useEffect(() => {
                 const initial = {};
-                toOrder.forEach(item => {
-                    initial[item.id] = (item.seuil - item.quantite) + 2;
-                });
+                toOrder.forEach(item => { initial[item.id] = (item.seuil - item.quantite) + 2; });
                 setOrderQties(initial);
             }, []);
 
-            const adjustQty = (id, amount) => {
-                setOrderQties(prev => ({ ...prev, [id]: Math.max(0, (prev[id] || 0) + amount) }));
-            };
+            const adjustQty = (id, amount) => { setOrderQties(prev => ({ ...prev, [id]: Math.max(0, (prev[id] || 0) + amount) })); };
 
             const groupedOrders = {};
             toOrder.forEach(item => {
@@ -456,9 +971,7 @@
             const generateText = (items) => {
                 let lines = [];
                 items.forEach(item => {
-                    if (orderQties[item.id] > 0) {
-                        lines.push(`- ${orderQties[item.id]}x ${item.nom} (${item.format})`);
-                    }
+                    if (orderQties[item.id] > 0) lines.push(`- ${orderQties[item.id]}x ${item.nom} (${item.format})`);
                 });
                 return lines.join('\n');
             };
@@ -466,10 +979,8 @@
             const handleEmail = (fId, items) => {
                 const fData = fournisseurs[fId];
                 if (!fData || !fData.email) return alert("Adresse e-mail non renseignée pour ce fournisseur.");
-                
                 const list = generateText(items);
-                if(!list) return alert("Aucune quantité sélectionnée.");
-
+                if (!list) return alert("Aucune quantité sélectionnée.");
                 const body = `Bonjour,\n\nVoici notre commande pour l'Amicale des Sapeurs-Pompiers de Rieumes :\n\n${list}\n\nMerci de nous confirmer la préparation de cette commande.\n\nCordialement,\nLe Bureau de l'Amicale`;
                 window.location.href = `mailto:${fData.email}?subject=Commande Amicale SP Rieumes&body=${encodeURIComponent(body)}`;
             };
@@ -477,10 +988,8 @@
             const handleSMS = (fId, items) => {
                 const fData = fournisseurs[fId];
                 if (!fData || !fData.tel) return alert("Numéro de téléphone non renseigné pour ce fournisseur.");
-                
                 const list = generateText(items);
-                if(!list) return alert("Aucune quantité sélectionnée.");
-
+                if (!list) return alert("Aucune quantité sélectionnée.");
                 const body = `Commande Amicale SP Rieumes :\n${list}\n\nMerci ! (Le Bureau)`;
                 const cleanPhone = fData.tel.replace(/\s+/g, '');
                 window.location.href = `sms:${cleanPhone}?body=${encodeURIComponent(body)}`;
@@ -489,11 +998,10 @@
             return (
                 <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
                     <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col">
-                        <div class="bg-pompier-red text-white px-6 py-4 rounded-t-xl flex justify-between items-center shrink-0">
+                        <div class="bg-pompier-red text-white px-6 py-4 flex justify-between items-center shrink-0">
                             <h2 class="text-xl font-bold"><i class="fa-solid fa-paper-plane mr-2"></i> Préparation des commandes</h2>
                             <button onClick={onClose} class="text-white hover:text-gray-200"><i class="fa-solid fa-times text-xl"></i></button>
                         </div>
-                        
                         <div class="p-6 overflow-y-auto">
                             {toOrder.length === 0 ? (
                                 <p class="text-center text-gray-500 py-8 font-bold">Aucun produit en rupture, tout est au vert !</p>
@@ -507,12 +1015,15 @@
                                             <h3 class="font-bold text-pompier-navy mb-4 text-lg border-b pb-2">{fData.nom}</h3>
                                             
                                             {items.map(item => (
-                                                <div key={item.id} class="flex justify-between items-center py-2">
-                                                    <div>
-                                                        <span class="font-semibold">{item.nom}</span>
-                                                        <span class="text-xs text-red-500 ml-2">(En stock: {item.quantite})</span>
+                                                <div key={item.id} class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0">
+                                                    <div class="flex flex-col">
+                                                        <span class="font-semibold text-gray-800">{item.nom}</span>
+                                                        <div class="flex items-center space-x-2 text-xs">
+                                                            <span class="bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded">{item.format}</span>
+                                                            <span class="text-red-500">Stock actuel : {item.quantite}</span>
+                                                        </div>
                                                     </div>
-                                                    <div class="flex items-center space-x-2 bg-white rounded border px-2 py-1">
+                                                    <div class="flex items-center space-x-2 bg-white rounded border px-2 py-1 shadow-sm">
                                                         <button onClick={() => adjustQty(item.id, -1)} class="w-6 h-6 text-gray-600 hover:text-pompier-red"><i class="fa-solid fa-minus text-xs"></i></button>
                                                         <span class="w-8 text-center font-bold text-pompier-navy">{orderQties[item.id] || 0}</span>
                                                         <button onClick={() => adjustQty(item.id, 1)} class="w-6 h-6 text-gray-600 hover:text-green-600"><i class="fa-solid fa-plus text-xs"></i></button>
@@ -521,17 +1032,15 @@
                                             ))}
                                             
                                             {fId !== 'unassigned' && (
-                                                <div class="mt-4 pt-4 border-t border-gray-200 flex space-x-3">
-                                                    <button onClick={() => handleEmail(fId, items)} class={`flex-1 py-2 rounded font-bold shadow flex justify-center items-center transition-colors ${fData.email ? 'bg-pompier-red text-white hover:bg-red-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>
-                                                        <i class="fa-solid fa-envelope mr-2"></i> E-mail
-                                                    </button>
-                                                    <button onClick={() => handleSMS(fId, items)} class={`flex-1 py-2 rounded font-bold shadow flex justify-center items-center transition-colors ${fData.tel ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>
-                                                        <i class="fa-solid fa-mobile-screen-button mr-2"></i> SMS
-                                                    </button>
+                                                <div class="mt-4 pt-4 border-t border-gray-200 flex flex-col sm:flex-row gap-2">
+                                                    <button onClick={() => handleEmail(fId, items)} class={`flex-1 py-2 rounded font-bold shadow flex justify-center items-center text-sm ${fData.email ? 'bg-pompier-red text-white hover:bg-red-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}><i class="fa-solid fa-envelope mr-2"></i> E-mail</button>
+                                                    <button onClick={() => handleSMS(fId, items)} class={`flex-1 py-2 rounded font-bold shadow flex justify-center items-center text-sm ${fData.tel ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}><i class="fa-solid fa-mobile-screen-button mr-2"></i> SMS</button>
+                                                    {fData.siteWeb && (
+                                                        <a href={fData.siteWeb.startsWith('http') ? fData.siteWeb : `https://${fData.siteWeb}`} target="_blank" rel="noopener noreferrer" class="flex-1 py-2 rounded font-bold shadow flex justify-center items-center text-sm bg-pompier-navy text-white hover:bg-blue-900 transition-colors">
+                                                            <i class="fa-solid fa-globe mr-2"></i> Site web
+                                                        </a>
+                                                    )}
                                                 </div>
-                                            )}
-                                            {fId === 'unassigned' && (
-                                                <p class="text-xs text-orange-500 mt-2 italic"><i class="fa-solid fa-triangle-exclamation"></i> Associez ces produits à un fournisseur pour pouvoir envoyer une commande.</p>
                                             )}
                                         </div>
                                     )
