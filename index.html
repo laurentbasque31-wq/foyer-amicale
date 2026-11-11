@@ -1,1059 +1,1897 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestion Stock - Amicale SP Rieumes</title>
-    <link rel="icon" href="./logo.png" type="image/png">
-    <link rel="apple-touch-icon" href="./logo.png">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    
-    <!-- Moteur Firebase -->
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
-    
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        pompier: {
-                            navy: '#1a2b4c',
-                            red: '#e3001b',
-                            anthracite: '#374151'
-                        }
-                    }
-                }
-            }
-        }
-    </script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trésorerie Amicale SP Rieumes</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React & ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Babel pour compiler le JSX dans le navigateur -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Firebase SDK ( Temps Réel ) -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type="number"] { -moz-appearance: textfield; }
+    @media print {
+      body { background: white !important; color: black !important; }
+      .print\:hidden { display: none !important; }
+    }
+  </style>
 </head>
-<body class="bg-gray-100 min-h-screen flex flex-col justify-between">
-    <div id="root" class="flex-grow"></div>
+<body class="bg-gray-950 text-gray-100 selection:bg-red-500/30">
+  <div id="root"></div>
 
-    <footer class="bg-pompier-navy text-gray-400 text-xs py-4 text-center border-t border-gray-800">
-        <p>© 2026 - Conçu et développé par <strong>Laurent Basque</strong> • Amicale des Sapeurs-Pompiers de Rieumes</p>
-    </footer>
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
 
-    <script type="text/babel">
-        const { useState, useEffect } = React;
+    // --- ICÔNES SVG INTÉGRÉES ---
+    const Icon = ({ children, className = "w-5 h-5" }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+        {children}
+      </svg>
+    );
 
-        // ==========================================
-        // CODE MAÎTRE (Gravé dans le marbre)
-        // ==========================================
-        // Profil Administrateur suprême : permet de voir/supprimer les codes PIN et vider l'historique
-        const CODE_PURGE = "0801"; 
+    const Flame = ({ className }) => <Icon className={className}><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></Icon>;
+    const LayoutDashboard = ({ className }) => <Icon className={className}><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></Icon>;
+    const List = ({ className }) => <Icon className={className}><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></Icon>;
+    const Plus = ({ className }) => <Icon className={className}><path d="M5 12h14"/><path d="M12 5v14"/></Icon>;
+    const Trash2 = ({ className }) => <Icon className={className}><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></Icon>;
+    const CheckCircle = ({ className }) => <Icon className={className}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></Icon>;
+    const Circle = ({ className }) => <Icon className={className}><circle cx="12" cy="12" r="10"/></Icon>;
+    const ArrowUpRight = ({ className }) => <Icon className={className}><path d="M7 7h10v10"/><path d="M7 17 17 7"/></Icon>;
+    const ArrowDownRight = ({ className }) => <Icon className={className}><path d="m7 7 10 10"/><path d="M17 7v10H7"/></Icon>;
+    const X = ({ className }) => <Icon className={className}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></Icon>;
+    const FileText = ({ className }) => <Icon className={className}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></Icon>;
+    const CreditCard = ({ className }) => <Icon className={className}><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></Icon>;
+    const Download = ({ className }) => <Icon className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></Icon>;
+    const Printer = ({ className }) => <Icon className={className}><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 9V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6"/><rect x="6" y="14" width="12" height="8" rx="1"/></Icon>;
+    const Settings = ({ className }) => <Icon className={className}><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></Icon>;
+    const Repeat = ({ className }) => <Icon className={className}><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></Icon>;
+    const Paperclip = ({ className }) => <Icon className={className}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></Icon>;
+    const Menu = ({ className }) => <Icon className={className}><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></Icon>;
+    const Lock = ({ className }) => <Icon className={className}><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></Icon>;
+    const Unlock = ({ className }) => <Icon className={className}><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></Icon>;
+    const Pencil = ({ className }) => <Icon className={className}><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></Icon>;
+    const Database = ({ className }) => <Icon className={className}><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></Icon>;
+    const Upload = ({ className }) => <Icon className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></Icon>;
+    const Calendar = ({ className }) => <Icon className={className}><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></Icon>;
+    const ChevronDown = ({ className }) => <Icon className={className}><path d="m6 9 6 6 6-6"/></Icon>;
+    const Users = ({ className }) => <Icon className={className}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></Icon>;
 
-        // Configuration Firebase
-        const firebaseConfig = {
-            apiKey: "AIzaSyCMcdctGoLFbIjn7Nx5JPsjI5UoRNcQd0I",
-            authDomain: "foyer-amicale-b874f.firebaseapp.com",
-            databaseURL: "https://foyer-amicale-b874f-default-rtdb.europe-west1.firebasedatabase.app",
-            projectId: "foyer-amicale-b874f",
-            storageBucket: "foyer-amicale-b874f.firebasestorage.app",
-            messagingSenderId: "860277578881",
-            appId: "1:860277578881:web:c1474b81085dbaf2a88180"
+    // --- CONFIGURATION FIREBASE ---
+    const DEFAULT_FIREBASE_URL = "https://tresorerie-amicale-sp-rieumes-default-rtdb.europe-west1.firebasedatabase.app";
+    const FALLBACK_FIREBASE_URL = "https://tresorerie-amicale-sp-rieumes-default-rtdb.firebaseio.com";
+
+    // --- SÉCURITÉ : VÉRIFICATION MASQUÉE DU MOT DE PASSE ---
+    // Le mot de passe (Admins@31) est vérifié via ses codes caractères pour ne pas apparaître en clair
+    const EXPECTED_VAULT_KEY = "vault_sp_51a9496ee31d9c64";
+    const checkPassword = (pwd) => {
+      const clean = (pwd || '').trim();
+      const targetCodes = [65, 100, 109, 105, 110, 115, 64, 51, 49]; // Admins@31
+      if (clean.length !== targetCodes.length) return false;
+      return targetCodes.every((code, idx) => clean.charCodeAt(idx) === code);
+    };
+
+    // --- COMPOSANT : Liste déroulante de recherche intelligente (s'ouvre vers le haut dans les modales) ---
+    function AutocompleteInput({ value, onChange, options, placeholder, className, required, direction = 'down' }) {
+      const [isOpen, setIsOpen] = useState(false);
+      const safeValue = value || '';
+      const filteredOptions = options.filter(opt => opt.toLowerCase().includes(safeValue.toLowerCase()));
+
+      const dropdownPositionClasses = direction === 'up'
+        ? 'bottom-full mb-1.5 shadow-[0_-10px_25px_-5px_rgba(0,0,0,0.6)]'
+        : 'top-full mt-1 shadow-2xl';
+
+      return (
+        <div className="relative w-full">
+          <input 
+            type="text" 
+            required={required}
+            className={className}
+            value={safeValue} 
+            onChange={(e) => { onChange(e.target.value); setIsOpen(true); }}
+            onFocus={() => setIsOpen(true)}
+            onBlur={() => setTimeout(() => setIsOpen(false), 180)}
+            placeholder={placeholder}
+          />
+          {isOpen && filteredOptions.length > 0 && (
+            <ul className={`absolute z-[200] w-full bg-gray-800 border border-gray-600 rounded-xl max-h-52 overflow-y-auto left-0 text-sm ${dropdownPositionClasses}`}>
+              {filteredOptions.map((opt, i) => (
+                <li 
+                  key={i} 
+                  className="px-3.5 py-2.5 text-gray-200 hover:bg-red-600 hover:text-white cursor-pointer border-b border-gray-700/50 last:border-0 transition-colors"
+                  onMouseDown={(e) => { e.preventDefault(); onChange(opt); setIsOpen(false); }}
+                >
+                  {opt}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      );
+    }
+
+    // --- COMPOSANT PRINCIPAL ---
+    function App() {
+      const [isAuthenticated, setIsAuthenticated] = useState(false);
+      const [passwordInput, setPasswordInput] = useState('');
+      const [passwordError, setPasswordError] = useState(false);
+
+      const [activeTab, setActiveTab] = useState('dashboard');
+      const [currentYear, setCurrentYear] = useState(new Date().getFullYear().toString());
+      const [currentAccountId, setCurrentAccountId] = useState('acc1');
+      const [isAccountPickerOpen, setIsAccountPickerOpen] = useState(false);
+      const [isYearPickerOpen, setIsYearPickerOpen] = useState(false);
+      const [hasSelectedAccountOnce, setHasSelectedAccountOnce] = useState(false);
+      const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+      // Chargement local par défaut (Sauvegarde Hors-Ligne instantanée)
+      const [closedYears, setClosedYears] = useState(() => {
+        const saved = localStorage.getItem('sp_rieumes_closedYears');
+        return saved ? JSON.parse(saved) : [];
+      });
+
+      const [accounts, setAccounts] = useState(() => {
+        const saved = localStorage.getItem('sp_rieumes_accounts');
+        return saved ? JSON.parse(saved) : [
+          { id: 'acc1', name: 'Compte Courant' },
+          { id: 'acc2', name: 'Livret A' },
+          { id: 'acc3', name: 'Caisse' }
+        ];
+      });
+
+      const [categories, setCategories] = useState(() => {
+        const saved = localStorage.getItem('sp_rieumes_categories');
+        return saved ? JSON.parse(saved) : [
+          { id: 'cat1', name: 'Cotisations' },
+          { id: 'cat2', name: 'Achats Équipement' },
+          { id: 'cat3', name: 'Ventes (Calendriers, etc.)' },
+          { id: 'cat4', name: 'Frais Bancaires' },
+          { id: 'cat5', name: 'Cérémonies / Repas' },
+          { id: 'cat6', name: 'Subventions / Dons' },
+          { id: 'cat7', name: 'Autre' }
+        ];
+      });
+
+      const [suppliers, setSuppliers] = useState(() => {
+        const saved = localStorage.getItem('sp_rieumes_suppliers');
+        return saved ? JSON.parse(saved) : [
+          { id: 'sup1', name: 'Super U Rieumes' },
+          { id: 'sup2', name: 'Boulangerie Rieumes' },
+          { id: 'sup3', name: 'UDSP 31' },
+          { id: 'sup4', name: 'Mairie de Rieumes' },
+          { id: 'sup5', name: 'Crédit Agricole' }
+        ];
+      });
+
+      const [transactions, setTransactions] = useState(() => {
+        const saved = localStorage.getItem('sp_rieumes_transactions');
+        return saved ? JSON.parse(saved) : [];
+      });
+
+      const [automations, setAutomations] = useState(() => {
+        const saved = localStorage.getItem('sp_rieumes_automations');
+        return saved ? JSON.parse(saved) : [];
+      });
+
+      const [manuallyOpenedYears, setManuallyOpenedYears] = useState(() => {
+        const saved = localStorage.getItem('sp_rieumes_manuallyOpenedYears');
+        return saved ? JSON.parse(saved) : [];
+      });
+
+      const [pendingOfflineSync, setPendingOfflineSync] = useState(() => {
+        return localStorage.getItem('sp_rieumes_pending_sync') === 'true';
+      });
+
+      // --- SYNCHRONISATION CLOUD FIREBASE SÉCURISÉE (AVEC PROTECTION HORS-LIGNE & MODE FICHIER LOCAL PC) ---
+      const [firebaseDbUrl, setFirebaseDbUrl] = useState(() => localStorage.getItem('sp_rieumes_fb_url') || DEFAULT_FIREBASE_URL);
+      const [tempFbUrl, setTempFbUrl] = useState(() => localStorage.getItem('sp_rieumes_fb_url') || DEFAULT_FIREBASE_URL);
+      const [cloudStatus, setCloudStatus] = useState('connecting');
+      const [cloudErrorDetail, setCloudErrorDetail] = useState('');
+      const dbRef = useRef(null);
+      const activeRestUrl = useRef(null);
+      const isUpdatingFromCloud = useRef(false);
+
+      // Écriture universelle (fonctionne à la fois sur serveur web et depuis un fichier local sur le Bureau PC)
+      const writeDataToCloud = async (payload) => {
+        if (dbRef.current) {
+          try {
+            await dbRef.current.set(payload);
+            return true;
+          } catch (e) {
+            console.warn("Repli sur écriture HTTPS directe :", e);
+          }
+        }
+        if (activeRestUrl.current) {
+          const res = await fetch(`${activeRestUrl.current}.json`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return true;
+        }
+        throw new Error('Aucune connexion active');
+      };
+
+      useEffect(() => {
+        const handleOnline = () => setCloudStatus('connecting');
+        const handleOffline = () => setCloudStatus('offline');
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+        if (!navigator.onLine) setCloudStatus('offline');
+        return () => {
+          window.removeEventListener('online', handleOnline);
+          window.removeEventListener('offline', handleOffline);
         };
-        
-        if (!firebase.apps.length) {
-            firebase.initializeApp(firebaseConfig);
+      }, []);
+
+      useEffect(() => {
+        if (!isAuthenticated) return;
+
+        const cleanUrl = (firebaseDbUrl || '').trim().replace(/\/$/, '');
+        if (!cleanUrl || !cleanUrl.startsWith('https://')) {
+          setCloudStatus('local');
+          dbRef.current = null;
+          activeRestUrl.current = null;
+          return;
         }
-        const db = firebase.database();
 
-        function App() {
-            // Mode et Rôles
-            const [userRole, setUserRole] = useState(sessionStorage.getItem('foyer_role') || null);
-            const isAdmin = userRole === 'bureau' || userRole === 'master';
-            const isMaster = userRole === 'master';
+        let isCancelled = false;
+        let activeRef = null;
+        let onValueChange = null;
 
-            const [showAdminLogin, setShowAdminLogin] = useState(false);
-            const [adminPin, setAdminPin] = useState('');
-            
-            // Mémoire de l'utilisateur
-            const [utilisateur, setUtilisateur] = useState(localStorage.getItem('foyer_utilisateur') || '');
+        const applyCloudData = (data, saveCallback) => {
+          const localUpdatedAt = localStorage.getItem('sp_rieumes_updatedAt') || '1970-01-01T00:00:00.000Z';
+          const hasPendingLocalChanges = localStorage.getItem('sp_rieumes_pending_sync') === 'true';
 
-            const [activeTab, setActiveTab] = useState('sorties');
-            const [stock, setStock] = useState({});
-            const [fournisseurs, setFournisseurs] = useState({});
-            const [famillesList, setFamillesList] = useState([]);
-            const [codesBureau, setCodesBureau] = useState({});
-            const [selectedCategory, setSelectedCategory] = useState('Toutes');
-            
-            // Modales
-            const [showProductModal, setShowProductModal] = useState(false);
-            const [editingProduct, setEditingProduct] = useState(null);
-            const [showOrderModal, setShowOrderModal] = useState(false);
-            const [showRestockModal, setShowRestockModal] = useState(false);
-            const [restockItem, setRestockItem] = useState(null);
-            const [restockQty, setRestockQty] = useState('');
-            const [showManageFamillesModal, setShowManageFamillesModal] = useState(false);
-            const [newFamilleInput, setNewFamilleInput] = useState('');
+          if (data) {
+            const cloudUpdatedAt = data.updatedAt || '1970-01-01T00:00:00.000Z';
 
-            // Synchronisation Firebase
-            useEffect(() => {
-                const stockRef = db.ref('stock');
-                const fourRef = db.ref('fournisseurs');
-                const famRef = db.ref('familles');
-                const codesRef = db.ref('parametres/codesBureau');
+            if (hasPendingLocalChanges && localUpdatedAt > cloudUpdatedAt) {
+              saveCallback({
+                transactions,
+                accounts,
+                categories,
+                suppliers,
+                automations,
+                closedYears,
+                manuallyOpenedYears,
+                updatedAt: localUpdatedAt
+              }).then(() => {
+                localStorage.setItem('sp_rieumes_pending_sync', 'false');
+                setPendingOfflineSync(false);
+              }).catch(() => {});
+            } else {
+              isUpdatingFromCloud.current = true;
+              setTransactions(data.transactions || []);
+              if (data.accounts) setAccounts(data.accounts);
+              if (data.categories) setCategories(data.categories);
+              if (data.suppliers) setSuppliers(data.suppliers);
+              setAutomations(data.automations || []);
+              setClosedYears(data.closedYears || []);
+              setManuallyOpenedYears(data.manuallyOpenedYears || []);
+              localStorage.setItem('sp_rieumes_updatedAt', cloudUpdatedAt);
+              localStorage.setItem('sp_rieumes_pending_sync', 'false');
+              setPendingOfflineSync(false);
+              setTimeout(() => { isUpdatingFromCloud.current = false; }, 250);
+            }
+          } else {
+            const nowIso = new Date().toISOString();
+            saveCallback({
+              transactions,
+              accounts,
+              categories,
+              suppliers,
+              automations,
+              closedYears,
+              manuallyOpenedYears,
+              updatedAt: nowIso
+            }).then(() => {
+              localStorage.setItem('sp_rieumes_updatedAt', nowIso);
+              localStorage.setItem('sp_rieumes_pending_sync', 'false');
+              setPendingOfflineSync(false);
+            }).catch(() => {});
+          }
+        };
 
-                stockRef.on('value', (snapshot) => { setStock(snapshot.val() || {}); });
-                fourRef.on('value', (snapshot) => { setFournisseurs(snapshot.val() || {}); });
-                
-                famRef.on('value', (snapshot) => {
-                    const data = snapshot.val();
-                    if (data) {
-                        setFamillesList(Object.entries(data).map(([id, val]) => ({ id, nom: val.nom })));
-                    } else {
-                        const defauts = ['Boissons', 'Snacks', 'Café / Chaud'];
-                        defauts.forEach(nom => famRef.push({ nom }));
-                    }
-                });
+        // Test rapide par HTTPS (contourne le blocage WebSocket des fichiers locaux file:// sur PC)
+        const connectSmart = async () => {
+          setCloudStatus(navigator.onLine ? 'connecting' : 'offline');
+          setCloudErrorDetail('');
 
-                // Chargement des codes PIN dynamiques
-                codesRef.on('value', (snapshot) => {
-                    const data = snapshot.val();
-                    if (data) {
-                        setCodesBureau(data);
-                    } else {
-                        // Création du premier code par défaut
-                        codesRef.push({ nom: "Bureau (Défaut)", pin: "1818" });
-                    }
-                });
+          const urlsToTry = [cleanUrl];
+          if (cleanUrl === DEFAULT_FIREBASE_URL) urlsToTry.push(FALLBACK_FIREBASE_URL);
 
-                return () => {
-                    stockRef.off();
-                    fourRef.off();
-                    famRef.off();
-                    codesRef.off();
-                };
-            }, []);
+          const pathsToTry = [
+            `coffre_fort/${EXPECTED_VAULT_KEY}`,
+            `coffre_fort/vault_sp_51a9496e7121b924`,
+            `tresorerie_amicale`
+          ];
 
-            const stockArray = Object.entries(stock).map(([id, data]) => ({
-                id,
-                famille: data.famille || (famillesList[0] ? famillesList[0].nom : 'Boissons'),
-                ...data
-            }));
+          for (const baseUrl of urlsToTry) {
+            for (const path of pathsToTry) {
+              if (isCancelled) return;
+              try {
+                const testResp = await fetch(`${baseUrl}/${path}.json`);
+                if (testResp.ok) {
+                  const initialData = await testResp.json();
+                  activeRestUrl.current = `${baseUrl}/${path}`;
+                  setCloudStatus('connected');
 
-            const availableCategories = ['Toutes', ...famillesList.map(f => f.nom)];
-            const filteredStock = selectedCategory === 'Toutes' ? stockArray : stockArray.filter(item => item.famille === selectedCategory);
-            const itemsInAlert = stockArray.filter(item => item.quantite <= item.seuil);
+                  // Initialisation du SDK temps réel en parallèle
+                  try {
+                    const appName = 'fb_app_' + Date.now();
+                    const app = firebase.initializeApp({ databaseURL: baseUrl }, appName);
+                    const db = firebase.database(app);
+                    const ref = db.ref(path);
+                    activeRef = ref;
+                    dbRef.current = ref;
 
-            // GESTION CONNEXION BUREAU & MAÎTRE
-            const handleAdminLogin = (e) => {
-                e.preventDefault();
-                const validPins = Object.values(codesBureau).map(c => c.pin);
-                
-                if (adminPin === CODE_PURGE) {
-                    // Connexion Profil Maître (Accès Total)
-                    setUserRole('master');
-                    sessionStorage.setItem('foyer_role', 'master');
-                    setShowAdminLogin(false);
-                    setAdminPin('');
-                } else if (validPins.includes(adminPin)) {
-                    // Connexion Profil Bureau Standard
-                    setUserRole('bureau');
-                    sessionStorage.setItem('foyer_role', 'bureau');
-                    setShowAdminLogin(false);
-                    setAdminPin('');
-                } else {
-                    alert("Code PIN incorrect ou non reconnu.");
-                    setAdminPin('');
-                }
-            };
-
-            const handleAdminLogout = () => {
-                setUserRole(null);
-                sessionStorage.removeItem('foyer_role');
-                setActiveTab('sorties');
-            };
-
-            // Fonctions du stock
-            const handleOpenAddModal = () => {
-                const defaultFam = famillesList.length > 0 ? famillesList[0].nom : 'Boissons';
-                setEditingProduct({ id: null, nom: '', famille: defaultFam, format: 'Canette 33cl', seuil: 5, quantite: 0, fournisseurId: '' });
-                setShowProductModal(true);
-            };
-
-            const handleOpenEditModal = (item) => {
-                setEditingProduct({ ...item });
-                setShowProductModal(true);
-            };
-
-            const handleSaveProduct = (e) => {
-                e.preventDefault();
-                const payload = {
-                    nom: editingProduct.nom,
-                    famille: editingProduct.famille || (famillesList[0] ? famillesList[0].nom : 'Boissons'),
-                    format: editingProduct.format || 'Unité',
-                    seuil: Number(editingProduct.seuil) || 0,
-                    fournisseurId: editingProduct.fournisseurId || ''
-                };
-
-                if (editingProduct.id) {
-                    db.ref(`stock/${editingProduct.id}`).update(payload);
-                } else {
-                    payload.quantite = Number(editingProduct.quantite) || 0;
-                    db.ref('stock').push(payload);
-                }
-                setShowProductModal(false);
-            };
-
-            const handleUpdateQty = (id, currentQty, amount) => {
-                const newQty = currentQty + amount;
-                if (newQty >= 0) db.ref(`stock/${id}`).update({ quantite: newQty });
-            };
-
-            const handleOpenRestock = (item) => {
-                setRestockItem(item);
-                setRestockQty('');
-                setShowRestockModal(true);
-            };
-
-            const handleConfirmRestock = (e) => {
-                e.preventDefault();
-                const addQty = parseInt(restockQty, 10);
-                const nomValide = utilisateur.trim();
-                
-                if (!nomValide) return alert("🚨 Merci d'indiquer ton nom ou surnom avant de valider l'entrée.");
-
-                if (!isNaN(addQty) && addQty > 0 && restockItem) {
-                    localStorage.setItem('foyer_utilisateur', nomValide);
-                    const newTotal = (restockItem.quantite || 0) + addQty;
-                    db.ref(`stock/${restockItem.id}`).update({ quantite: newTotal });
-                    
-                    db.ref('historique').push({
-                        date: firebase.database.ServerValue.TIMESTAMP,
-                        type: 'entree',
-                        utilisateur: nomValide,
-                        articles: [{ id: restockItem.id, nom: restockItem.nom, quantite: addQty, format: restockItem.format }]
+                    onValueChange = ref.on('value', (snapshot) => {
+                      if (isCancelled) return;
+                      setCloudStatus('connected');
+                      applyCloudData(snapshot.val(), (payload) => writeDataToCloud(payload));
                     });
+                  } catch (sdkErr) {
+                    console.warn("SDK WebSocket indisponible en local, mode HTTPS actif :", sdkErr);
+                  }
 
-                    setShowRestockModal(false);
+                  applyCloudData(initialData, (payload) => writeDataToCloud(payload));
+                  return;
+                } else if (testResp.status === 401 || testResp.status === 403) {
+                  setCloudErrorDetail('Règles Firebase verrouillées (Permission refusée)');
                 }
-            };
+              } catch (netErr) {
+                console.warn("Tentative échouée sur", baseUrl, path, netErr);
+              }
+            }
+          }
 
-            const handleRemoveStock = (id, nom) => {
-                if (confirm(`Supprimer définitivement "${nom}" du stock ?`)) db.ref(`stock/${id}`).remove();
-            };
+          if (!isCancelled) {
+            setCloudStatus(navigator.onLine ? 'error' : 'offline');
+          }
+        };
 
-            const handleAddFamille = (e) => {
-                e.preventDefault();
-                const trimmed = newFamilleInput.trim();
-                if (!trimmed) return;
-                if (famillesList.some(f => f.nom.toLowerCase() === trimmed.toLowerCase())) return alert('Cette famille existe déjà.');
-                db.ref('familles').push({ nom: trimmed });
-                setNewFamilleInput('');
-            };
+        connectSmart();
 
-            const handleDeleteFamille = (id, nom) => {
-                if (stockArray.some(item => item.famille === nom)) return alert(`Impossible : des articles sont encore rattachés à "${nom}".`);
-                if (confirm(`Supprimer la famille "${nom}" ?`)) {
-                    db.ref(`familles/${id}`).remove();
-                    if (selectedCategory === nom) setSelectedCategory('Toutes');
-                }
-            };
+        return () => {
+          isCancelled = true;
+          if (activeRef && onValueChange) {
+            activeRef.off('value', onValueChange);
+          }
+        };
+      }, [firebaseDbUrl, isAuthenticated]);
 
-            const handleAddFournisseur = () => {
-                const nom = prompt("Nom du fournisseur :");
-                if (nom) db.ref('fournisseurs').push({ nom, email: "", tel: "", siteWeb: "" });
-            };
+      // Sauvegarde automatique dans le navigateur (Hors-ligne) ET dans le Cloud (En ligne)
+      useEffect(() => {
+        localStorage.setItem('sp_rieumes_transactions', JSON.stringify(transactions));
+        localStorage.setItem('sp_rieumes_accounts', JSON.stringify(accounts));
+        localStorage.setItem('sp_rieumes_categories', JSON.stringify(categories));
+        localStorage.setItem('sp_rieumes_suppliers', JSON.stringify(suppliers));
+        localStorage.setItem('sp_rieumes_automations', JSON.stringify(automations));
+        localStorage.setItem('sp_rieumes_closedYears', JSON.stringify(closedYears));
+        localStorage.setItem('sp_rieumes_manuallyOpenedYears', JSON.stringify(manuallyOpenedYears));
 
-            const handleUpdateFournisseur = (id, field, value) => {
-                db.ref(`fournisseurs/${id}`).update({ [field]: value });
-            };
+        if (!isUpdatingFromCloud.current && isAuthenticated) {
+          const nowIso = new Date().toISOString();
+          localStorage.setItem('sp_rieumes_updatedAt', nowIso);
 
-            const handleRemoveFournisseur = (id) => {
-                if (confirm("Supprimer ce fournisseur ?")) db.ref(`fournisseurs/${id}`).remove();
-            };
-
-            return (
-                <div>
-                    <header class="bg-pompier-navy text-white shadow-lg border-b-4 border-pompier-red">
-                        <div class="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
-                            <div class="flex items-center space-x-4">
-                                <div class="bg-white p-1 rounded-xl shadow">
-                                    <img src="./logo.png" alt="Écusson" class="h-14 w-14 object-contain" />
-                                </div>
-                                <div>
-                                    <h1 class="text-2xl font-bold uppercase tracking-wider">Amicale SP Rieumes</h1>
-                                    <p class="text-gray-300 text-sm">Gestion des stocks du Foyer</p>
-                                </div>
-                            </div>
-                            
-                            <div class="flex items-center space-x-2">
-                                {isAdmin && (
-                                    <button 
-                                        onClick={() => setShowOrderModal(true)}
-                                        class={`px-3 sm:px-4 py-2 rounded-lg font-bold flex items-center space-x-2 transition-colors ${itemsInAlert.length > 0 ? 'bg-pompier-red hover:bg-red-700 animate-pulse' : 'bg-gray-600 hover:bg-gray-500'}`}
-                                    >
-                                        <i class="fa-solid fa-cart-shopping"></i>
-                                        <span class="hidden sm:inline">Commander</span>
-                                        {itemsInAlert.length > 0 && (
-                                            <span class="bg-white text-pompier-red px-2 py-0.5 rounded-full text-sm font-bold">
-                                                {itemsInAlert.length}
-                                            </span>
-                                        )}
-                                    </button>
-                                )}
-                                
-                                {!isAdmin ? (
-                                    <button onClick={() => setShowAdminLogin(true)} class="bg-gray-600 hover:bg-gray-500 text-white px-3 sm:px-4 py-2 rounded-lg font-bold flex items-center transition-colors" title="Connexion Bureau">
-                                        <i class="fa-solid fa-lock"></i>
-                                    </button>
-                                ) : (
-                                    <button onClick={handleAdminLogout} class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 sm:px-4 py-2 rounded-lg font-bold flex items-center transition-colors" title="Déconnexion Bureau">
-                                        <i class="fa-solid fa-lock-open"></i>
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* MENU DÉROULANT DES ONGLETS */}
-                        <div class="max-w-6xl mx-auto px-4 mt-2 flex space-x-1 sm:space-x-2 overflow-x-auto scrollbar-hide">
-                            <button onClick={() => setActiveTab('sorties')} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'sorties' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
-                                <i class="fa-solid fa-arrow-right-from-bracket"></i><span>Sorties</span>
-                            </button>
-                            
-                            {isAdmin && (
-                                <>
-                                    <button onClick={() => setActiveTab('stock')} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'stock' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
-                                        <i class="fa-solid fa-boxes-stacked"></i><span>Stocks</span>
-                                    </button>
-                                    <button onClick={() => setActiveTab('historique')} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'historique' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
-                                        <i class="fa-solid fa-clock-rotate-left"></i><span>Historique</span>
-                                    </button>
-                                    <button onClick={() => setActiveTab('fournisseurs')} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'fournisseurs' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
-                                        <i class="fa-solid fa-address-book"></i><span class="hidden sm:inline">Fournisseurs</span>
-                                    </button>
-                                    <button onClick={() => setActiveTab('securite')} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'securite' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
-                                        <i class="fa-solid fa-shield-halved"></i><span class="hidden sm:inline">Sécurité</span>
-                                    </button>
-                                </>
-                            )}
-                        </div>
-                    </header>
-
-                    <main class="max-w-6xl mx-auto px-4 py-8">
-                        {activeTab === 'sorties' && (
-                            <div>
-                                <div class="mb-4 flex items-center space-x-2 overflow-x-auto pb-2">
-                                    <span class="text-xs font-bold text-gray-500 uppercase mr-1">Famille :</span>
-                                    {availableCategories.map(cat => (
-                                        <button key={cat} onClick={() => setSelectedCategory(cat)} class={`px-3 py-1.5 rounded-full text-xs font-bold transition-all shrink-0 ${selectedCategory === cat ? 'bg-pompier-red text-white shadow' : 'bg-white text-gray-700 border hover:bg-gray-50'}`}>
-                                            {cat}
-                                        </button>
-                                    ))}
-                                </div>
-                                <SortiesTab stock={filteredStock} onUpdateQty={handleUpdateQty} db={db} utilisateur={utilisateur} setUtilisateur={setUtilisateur} />
-                            </div>
-                        )}
-
-                        {activeTab === 'stock' && isAdmin && (
-                            <div>
-                                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-                                    <div>
-                                        <h2 class="text-2xl font-bold text-pompier-navy">Inventaire du Foyer</h2>
-                                    </div>
-                                    <div class="flex items-center space-x-2">
-                                        <button onClick={() => setShowManageFamillesModal(true)} class="bg-gray-200 hover:bg-gray-300 text-pompier-navy px-3 py-2.5 rounded-lg font-semibold text-sm flex items-center space-x-1.5 transition">
-                                            <i class="fa-solid fa-tags"></i><span>Familles</span>
-                                        </button>
-                                        <button onClick={handleOpenAddModal} class="bg-pompier-navy text-white px-4 py-2.5 rounded-lg shadow font-semibold hover:bg-blue-900 flex items-center space-x-2">
-                                            <i class="fa-solid fa-plus"></i><span>Produit</span>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div class="mb-6 flex items-center space-x-2 overflow-x-auto pb-2">
-                                    {availableCategories.map(cat => (
-                                        <button key={cat} onClick={() => setSelectedCategory(cat)} class={`px-3 py-1.5 rounded-full text-xs font-bold transition-all shrink-0 ${selectedCategory === cat ? 'bg-pompier-navy text-white shadow' : 'bg-white text-gray-700 border hover:bg-gray-50'}`}>
-                                            {cat} {cat === 'Toutes' ? `(${stockArray.length})` : `(${stockArray.filter(i => i.famille === cat).length})`}
-                                        </button>
-                                    ))}
-                                </div>
-
-                                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {filteredStock.map(item => {
-                                        const isAlert = item.quantite <= item.seuil;
-                                        const statusBorder = isAlert ? 'border-red-500 bg-red-50/40' : 'border-gray-200 bg-white';
-                                        
-                                        return (
-                                            <div key={item.id} class={`p-4 rounded-xl border-2 shadow-sm flex flex-col justify-between ${statusBorder}`}>
-                                                <div class="flex justify-between items-start">
-                                                    <div class="flex-1">
-                                                        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-pompier-navy uppercase tracking-wider">{item.famille}</span>
-                                                        {isAlert && <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-600 text-white uppercase ml-1">Alerte</span>}
-                                                        <h3 class="font-bold text-lg text-gray-900 mt-1">{item.nom}</h3>
-                                                        <p class="text-xs text-gray-500">{item.format}</p>
-                                                    </div>
-                                                    <div class="flex space-x-1">
-                                                        <button onClick={() => handleOpenEditModal(item)} class="p-1.5 text-gray-400 hover:text-blue-600"><i class="fa-solid fa-pen-to-square"></i></button>
-                                                        <button onClick={() => handleRemoveStock(item.id, item.nom)} class="p-1.5 text-gray-400 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
-                                                    </div>
-                                                </div>
-
-                                                <div class="mt-4 pt-3 border-t border-gray-200 flex items-center justify-between">
-                                                    <div>
-                                                        <button onClick={() => handleOpenRestock(item)} class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5 rounded font-bold shadow-sm flex items-center space-x-1.5">
-                                                            <i class="fa-solid fa-arrow-down-to-bracket text-[10px]"></i><span>+ Entrée</span>
-                                                        </button>
-                                                    </div>
-                                                    <div class="bg-gray-50 rounded-lg px-3 py-1.5 border border-gray-200 flex flex-col items-center justify-center min-w-[3rem]">
-                                                        <span class="text-[9px] text-gray-500 uppercase font-bold leading-none mb-1">En stock</span>
-                                                        <span class="font-bold text-xl text-pompier-navy leading-none">{item.quantite}</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        )}
-
-                        {activeTab === 'historique' && isAdmin && (
-                            <HistoriqueTab db={db} CODE_PURGE={CODE_PURGE} isMaster={isMaster} />
-                        )}
-
-                        {activeTab === 'fournisseurs' && isAdmin && (
-                            <div>
-                                <div class="flex justify-between items-center mb-6">
-                                    <h2 class="text-2xl font-bold text-pompier-navy">Fournisseurs</h2>
-                                    <button onClick={handleAddFournisseur} class="bg-pompier-navy text-white px-4 py-2 rounded shadow hover:bg-blue-900">
-                                        <i class="fa-solid fa-plus mr-2"></i> Ajouter
-                                    </button>
-                                </div>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {Object.entries(fournisseurs).map(([id, f]) => (
-                                        <div key={id} class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 relative group">
-                                            <button onClick={() => handleRemoveFournisseur(id)} class="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors"><i class="fa-solid fa-trash"></i></button>
-                                            <h3 class="font-bold text-lg mb-3 text-pompier-navy pr-8">{f.nom}</h3>
-                                            <div class="space-y-2">
-                                                <div class="flex items-center"><i class="fa-solid fa-envelope w-6 text-gray-400"></i><input type="email" placeholder="Email" value={f.email} onChange={(e) => handleUpdateFournisseur(id, 'email', e.target.value)} class="flex-1 bg-gray-50 border rounded px-2 py-1 text-sm outline-none focus:border-pompier-red"/></div>
-                                                <div class="flex items-center"><i class="fa-solid fa-phone w-6 text-gray-400"></i><input type="tel" placeholder="Téléphone" value={f.tel} onChange={(e) => handleUpdateFournisseur(id, 'tel', e.target.value)} class="flex-1 bg-gray-50 border rounded px-2 py-1 text-sm outline-none focus:border-pompier-red"/></div>
-                                                <div class="flex items-center">
-                                                    <i class="fa-solid fa-globe w-6 text-gray-400"></i>
-                                                    <input type="url" placeholder="Site web (https://...)" value={f.siteWeb || ''} onChange={(e) => handleUpdateFournisseur(id, 'siteWeb', e.target.value)} class="flex-1 bg-gray-50 border rounded px-2 py-1 text-sm outline-none focus:border-pompier-red"/>
-                                                    {f.siteWeb && (
-                                                        <a href={f.siteWeb.startsWith('http') ? f.siteWeb : `https://${f.siteWeb}`} target="_blank" rel="noopener noreferrer" class="ml-2 text-pompier-navy hover:text-blue-600 transition-colors" title="Visiter le site">
-                                                            <i class="fa-solid fa-arrow-up-right-from-square text-lg"></i>
-                                                        </a>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
-                        {activeTab === 'securite' && isAdmin && (
-                            <SecuriteTab db={db} codesBureau={codesBureau} CODE_PURGE={CODE_PURGE} isMaster={isMaster} />
-                        )}
-                    </main>
-
-                    {/* MODALE CONNEXION BUREAU */}
-                    {showAdminLogin && (
-                        <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
-                            <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden">
-                                <div class="bg-pompier-navy text-white px-5 py-4 flex justify-between items-center">
-                                    <h2 class="text-lg font-bold"><i class="fa-solid fa-lock mr-2"></i>Accès Bureau</h2>
-                                    <button onClick={() => {setShowAdminLogin(false); setAdminPin('');}} class="text-white hover:text-gray-200"><i class="fa-solid fa-times text-xl"></i></button>
-                                </div>
-                                <form onSubmit={handleAdminLogin} class="p-6 space-y-5">
-                                    <p class="text-sm text-gray-600 text-center">Saisis ton code PIN ou le code Maître pour accéder à la gestion complète.</p>
-                                    <div>
-                                        <input 
-                                            autoFocus
-                                            required 
-                                            type="password" 
-                                            pattern="[0-9]*"
-                                            inputMode="numeric"
-                                            maxLength="4"
-                                            placeholder="Code à 4 chiffres"
-                                            value={adminPin} 
-                                            onChange={e => setAdminPin(e.target.value)} 
-                                            class="w-full border-2 border-pompier-navy rounded-lg p-3 text-2xl font-bold text-center outline-none tracking-[0.5em] focus:ring-2 focus:ring-blue-400" 
-                                        />
-                                    </div>
-                                    <button type="submit" class="w-full bg-pompier-navy hover:bg-blue-900 text-white font-bold py-3 rounded-lg shadow-md transition-colors">Déverrouiller</button>
-                                </form>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* MODALES PRODUITS & FAMILLES (isAdmin) */}
-                    {showProductModal && editingProduct && isAdmin && (
-                        <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
-                            <div class="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
-                                <div class="bg-pompier-navy text-white px-6 py-4 flex justify-between items-center">
-                                    <h2 class="text-xl font-bold">{editingProduct.id ? 'Modifier le produit' : 'Nouveau Produit'}</h2>
-                                    <button onClick={() => setShowProductModal(false)} class="text-white"><i class="fa-solid fa-times text-xl"></i></button>
-                                </div>
-                                <form onSubmit={handleSaveProduct} class="p-6 space-y-4">
-                                    <div>
-                                        <label class="block text-sm font-bold mb-1">Nom *</label>
-                                        <input required type="text" value={editingProduct.nom} onChange={e => setEditingProduct({...editingProduct, nom: e.target.value})} class="w-full border rounded p-2 outline-none" />
-                                    </div>
-                                    <div class="flex space-x-3">
-                                        <div class="flex-1">
-                                            <label class="block text-sm font-bold mb-1">Famille *</label>
-                                            <select required value={editingProduct.famille} onChange={e => setEditingProduct({...editingProduct, famille: e.target.value})} class="w-full border rounded p-2 bg-white font-semibold">
-                                                {famillesList.map(f => <option key={f.id} value={f.nom}>{f.nom}</option>)}
-                                            </select>
-                                        </div>
-                                        <div class="flex-1">
-                                            <label class="block text-sm font-bold mb-1">Format</label>
-                                            <input required type="text" value={editingProduct.format} onChange={e => setEditingProduct({...editingProduct, format: e.target.value})} class="w-full border rounded p-2 outline-none" />
-                                        </div>
-                                    </div>
-                                    <div class="flex space-x-3">
-                                        <div class="flex-1">
-                                            <label class="block text-sm font-bold mb-1">Seuil d'alerte</label>
-                                            <input required type="number" min="0" value={editingProduct.seuil} onChange={e => setEditingProduct({...editingProduct, seuil: e.target.value})} class="w-full border rounded p-2 outline-none" />
-                                        </div>
-                                        {!editingProduct.id && (
-                                            <div class="flex-1">
-                                                <label class="block text-sm font-bold mb-1">Stock initial</label>
-                                                <input required type="number" min="0" value={editingProduct.quantite} onChange={e => setEditingProduct({...editingProduct, quantite: e.target.value})} class="w-full border rounded p-2 outline-none" />
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-bold mb-1">Fournisseur attitré</label>
-                                        <select value={editingProduct.fournisseurId} onChange={e => setEditingProduct({...editingProduct, fournisseurId: e.target.value})} class="w-full border rounded p-2 bg-white">
-                                            <option value="">-- Aucun --</option>
-                                            {Object.entries(fournisseurs).map(([fId, f]) => <option key={fId} value={fId}>{f.nom}</option>)}
-                                        </select>
-                                    </div>
-                                    <div class="pt-4">
-                                        <button type="submit" class="w-full bg-pompier-red text-white font-bold py-3 rounded-lg shadow-md"><i class="fa-solid fa-check mr-2"></i>Valider</button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    )}
-
-                    {showManageFamillesModal && isAdmin && (
-                        <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
-                            <div class="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
-                                <div class="bg-pompier-navy text-white px-5 py-4 flex justify-between items-center">
-                                    <h2 class="text-lg font-bold"><i class="fa-solid fa-tags mr-2"></i>Gérer les Familles</h2>
-                                    <button onClick={() => setShowManageFamillesModal(false)} class="text-white"><i class="fa-solid fa-times text-xl"></i></button>
-                                </div>
-                                <div class="p-5 space-y-4">
-                                    <form onSubmit={handleAddFamille} class="flex space-x-2">
-                                        <input required type="text" placeholder="Nouvelle famille..." value={newFamilleInput} onChange={e => setNewFamilleInput(e.target.value)} class="flex-1 border rounded-lg px-3 py-2 text-sm outline-none" />
-                                        <button type="submit" class="bg-pompier-navy text-white px-4 py-2 rounded-lg font-bold text-sm"><i class="fa-solid fa-plus mr-1"></i>Créer</button>
-                                    </form>
-                                    <div class="divide-y max-h-60 overflow-y-auto border rounded-lg">
-                                        {famillesList.map(fam => {
-                                            const count = stockArray.filter(i => i.famille === fam.nom).length;
-                                            return (
-                                                <div key={fam.id} class="flex justify-between items-center p-3 hover:bg-gray-50">
-                                                    <div>
-                                                        <span class="font-bold text-pompier-navy">{fam.nom}</span>
-                                                        <span class="text-xs text-gray-400 block">{count} produit(s)</span>
-                                                    </div>
-                                                    <button onClick={() => handleDeleteFamille(fam.id, fam.nom)} class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* MODALE ENTRÉE DE STOCK */}
-                    {showRestockModal && restockItem && isAdmin && (
-                        <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
-                            <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden">
-                                <div class="bg-emerald-600 text-white px-5 py-4 flex justify-between items-center">
-                                    <h2 class="text-lg font-bold"><i class="fa-solid fa-arrow-down-to-bracket mr-2"></i>Entrée de stock</h2>
-                                    <button onClick={() => setShowRestockModal(false)} class="text-white"><i class="fa-solid fa-times"></i></button>
-                                </div>
-                                <form onSubmit={handleConfirmRestock} class="p-5 space-y-4">
-                                    <div>
-                                        <h3 class="text-lg font-bold text-pompier-navy">{restockItem.nom}</h3>
-                                        <p class="text-xs text-gray-400">Stock actuel : {restockItem.quantite} ({restockItem.format})</p>
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-bold mb-2">Quantité à ajouter :</label>
-                                        <input autoFocus required type="number" min="1" value={restockQty} onChange={e => setRestockQty(e.target.value)} class="w-full border-2 border-emerald-500 rounded-lg p-2.5 text-xl font-bold text-center outline-none focus:ring-2 focus:ring-emerald-300" />
-                                    </div>
-                                    <div class="pt-2 border-t border-gray-100">
-                                        <label class="block text-sm font-bold text-gray-700 mb-2">Qui fait cette entrée ?</label>
-                                        <div class="flex items-center bg-gray-50 border rounded-lg px-3 py-2 focus-within:ring-2 ring-emerald-400">
-                                            <i class="fa-solid fa-user text-gray-400 mr-2"></i>
-                                            <input 
-                                                type="text" 
-                                                placeholder="Ton nom / surnom..." 
-                                                value={utilisateur}
-                                                onChange={e => setUtilisateur(e.target.value)}
-                                                class="bg-transparent outline-none flex-1 text-sm font-semibold text-pompier-navy"
-                                            />
-                                        </div>
-                                    </div>
-                                    <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg shadow transition-colors">
-                                        Valider la rentrée
-                                    </button>
-                                </form>
-                            </div>
-                        </div>
-                    )}
-
-                    {showOrderModal && isAdmin && <OrderModal onClose={() => setShowOrderModal(false)} stock={stockArray} fournisseurs={fournisseurs} />}
-                </div>
-            );
-        }
-
-        // ==========================================
-        // COMPOSANT ONGLET : GESTION DES SORTIES (PUBLIC)
-        // ==========================================
-        function SortiesTab({ stock, onUpdateQty, db, utilisateur, setUtilisateur }) {
-            const [cart, setCart] = useState({});
-
-            const handleCartChange = (id, delta, maxStock) => {
-                setCart(prev => {
-                    const current = prev[id] || 0;
-                    const next = Math.max(0, current + delta);
-                    if (next > maxStock) return prev;
-                    if (next === 0) { const copy = { ...prev }; delete copy[id]; return copy; }
-                    return { ...prev, [id]: next };
-                });
-            };
-
-            const confirmValidation = () => {
-                if (Object.keys(cart).length === 0) return;
-                if (!utilisateur.trim()) return alert("🚨 Merci d'indiquer ton nom ou surnom avant de valider la sortie.");
-
-                localStorage.setItem('foyer_utilisateur', utilisateur.trim());
-                const articlesSortis = [];
-
-                Object.entries(cart).forEach(([id, qtyToRemove]) => {
-                    const item = stock.find(i => i.id === id);
-                    if (item) {
-                        onUpdateQty(id, item.quantite, -qtyToRemove);
-                        articlesSortis.push({ id, nom: item.nom, quantite: qtyToRemove, format: item.format });
-                    }
-                });
-
-                db.ref('historique').push({
-                    date: firebase.database.ServerValue.TIMESTAMP,
-                    type: 'sortie',
-                    utilisateur: utilisateur.trim(),
-                    articles: articlesSortis
-                });
-
-                setCart({});
-                alert("Sorties enregistrées avec succès !");
-            };
-
-            const totalItemsCount = Object.values(cart).reduce((a, b) => a + b, 0);
-
-            return (
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div class="lg:col-span-2 space-y-4">
-                        <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                            <h2 class="text-xl font-bold text-pompier-navy mb-4"><i class="fa-solid fa-arrow-right-from-bracket mr-2"></i> Articles sortis du foyer</h2>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                {stock.map(item => {
-                                    const qtyInCart = cart[item.id] || 0;
-                                    const remainingStock = item.quantite - qtyInCart;
-                                    return (
-                                        <div key={item.id} class="bg-gray-50 border rounded-xl p-3 flex flex-col justify-between">
-                                            <div class="flex justify-between items-start mb-2">
-                                                <div>
-                                                    <h3 class="font-bold text-pompier-navy">{item.nom}</h3>
-                                                    <span class="text-xs text-gray-500">Stock dispo : <strong class={remainingStock <= item.seuil ? "text-red-600" : ""}>{remainingStock}</strong></span>
-                                                </div>
-                                                <span class="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded">{item.format}</span>
-                                            </div>
-                                            <div class="flex items-center justify-between mt-2 pt-2 border-t border-gray-200">
-                                                <span class="text-xs font-semibold text-gray-600">Quantité :</span>
-                                                <div class="flex items-center space-x-2 bg-white border rounded px-2 py-1 shadow-sm">
-                                                    <button onClick={() => handleCartChange(item.id, -1, item.quantite)} class="w-7 h-7 flex items-center justify-center text-gray-600 hover:text-pompier-red rounded"><i class="fa-solid fa-minus text-xs"></i></button>
-                                                    <span class="w-6 text-center font-bold text-pompier-navy">{qtyInCart}</span>
-                                                    <button onClick={() => handleCartChange(item.id, 1, item.quantite)} class={`w-7 h-7 flex items-center justify-center rounded text-white ${remainingStock > 0 ? 'bg-pompier-navy hover:bg-blue-900' : 'bg-gray-300 cursor-not-allowed'}`} disabled={remainingStock <= 0}><i class="fa-solid fa-plus text-xs"></i></button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="lg:col-span-1">
-                        <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 sticky top-4">
-                            <h3 class="font-bold text-lg text-pompier-navy mb-3 flex items-center justify-between">
-                                <span><i class="fa-solid fa-list-check mr-2"></i> Validation</span>
-                                <span class="bg-pompier-red text-white text-xs px-2 py-1 rounded-full">{totalItemsCount} art.</span>
-                            </h3>
-                            <div class="space-y-3 mb-4 max-h-60 overflow-y-auto pr-1">
-                                {Object.entries(cart).map(([id, qty]) => {
-                                    const item = stock.find(i => i.id === id);
-                                    if (!item) return null;
-                                    return (
-                                        <div key={id} class="flex justify-between items-center text-sm border-b pb-2">
-                                            <div>
-                                                <span class="font-semibold">{item.nom}</span>
-                                                <span class="text-xs text-gray-400 block">{item.format}</span>
-                                            </div>
-                                            <div class="flex items-center space-x-2">
-                                                <span class="font-bold text-pompier-red">-{qty}</span>
-                                                <button onClick={() => handleCartChange(id, -qty, item.quantite)} class="text-gray-400 hover:text-red-600"><i class="fa-solid fa-trash text-xs"></i></button>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                                {Object.keys(cart).length === 0 && <p class="text-sm text-gray-400 italic text-center py-4">Panier de sortie vide.</p>}
-                            </div>
-                            <div class="mt-4 pt-4 border-t border-gray-200 mb-4">
-                                <label class="block text-sm font-bold text-pompier-navy mb-2">Qui enregistre cette sortie ?</label>
-                                <div class="flex items-center bg-gray-50 border rounded-lg px-3 py-2 focus-within:ring-2 ring-pompier-red">
-                                    <i class="fa-solid fa-user text-gray-400 mr-2"></i>
-                                    <input type="text" placeholder="Ton nom / surnom..." value={utilisateur} onChange={e => setUtilisateur(e.target.value)} class="bg-transparent outline-none flex-1 text-sm font-semibold text-pompier-navy" />
-                                </div>
-                            </div>
-                            <button onClick={confirmValidation} class={`w-full py-3 rounded-lg font-bold shadow transition-colors flex items-center justify-center space-x-2 ${totalItemsCount > 0 ? 'bg-pompier-red text-white hover:bg-red-700' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`} disabled={totalItemsCount === 0}>
-                                <i class="fa-solid fa-check"></i><span>Valider la sortie</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            );
-        }
-
-        // ==========================================
-        // COMPOSANT ONGLET : HISTORIQUE
-        // ==========================================
-        function HistoriqueTab({ db, CODE_PURGE, isMaster }) {
-            const [logs, setLogs] = useState([]);
-            const [showPinPrompt, setShowPinPrompt] = useState(false);
-            const [pinCode, setPinCode] = useState('');
-            
-            useEffect(() => {
-                const ref = db.ref('historique').orderByChild('date').limitToLast(50);
-                ref.on('value', snap => {
-                    const data = snap.val();
-                    if(data) {
-                        const logArray = Object.entries(data).map(([id, val]) => ({ id, ...val })).reverse();
-                        setLogs(logArray);
-                    } else {
-                        setLogs([]);
-                    }
-                });
-                return () => ref.off();
-            }, []);
-
-            const handleVerifyPinAndClear = (e) => {
-                e.preventDefault();
-                if (pinCode === CODE_PURGE) {
-                    if(confirm("Action irréversible. Es-tu sûr de vouloir vider tout l'historique ?")) {
-                        db.ref('historique').remove();
-                        setShowPinPrompt(false);
-                        setPinCode('');
-                        alert("Historique effacé avec succès !");
-                    }
-                } else {
-                    alert("Code de purge incorrect. L'historique n'a pas été effacé.");
-                    setPinCode('');
-                }
-            };
-
-            return (
-                <div class="max-w-3xl mx-auto relative">
-                    <div class="flex justify-between items-center mb-6">
-                        <h2 class="text-2xl font-bold text-pompier-navy">Journal des mouvements</h2>
-                        
-                        {/* Le bouton Vider n'apparaît QUE pour le profil Maître */}
-                        {logs.length > 0 && isMaster && (
-                            <button onClick={() => {setShowPinPrompt(true); setPinCode('');}} class="text-xs bg-red-100 text-red-600 hover:bg-red-200 px-3 py-1.5 rounded-lg font-bold transition flex items-center space-x-1 shadow-sm">
-                                <i class="fa-solid fa-trash-can"></i><span>Vider</span>
-                            </button>
-                        )}
-                    </div>
-
-                    {logs.length === 0 ? (
-                        <p class="text-center text-gray-500 py-8 bg-white rounded-xl shadow-sm">Aucun historique pour le moment.</p>
-                    ) : (
-                        <div class="space-y-4">
-                            {logs.map(log => (
-                                <div key={log.id} class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-gray-200" style={{ borderLeftColor: log.type === 'sortie' ? '#e3001b' : '#059669' }}>
-                                    <div class="flex justify-between items-start mb-3">
-                                        <div><span class="font-bold text-gray-800 text-lg"><i class="fa-solid fa-user-pen text-gray-400 mr-2 text-sm"></i>{log.utilisateur}</span></div>
-                                        <div class="text-right">
-                                            <div class="text-xs text-gray-500 font-semibold mb-1">{new Date(log.date).toLocaleString('fr-FR', {day: '2-digit', month: 'short', hour: '2-digit', minute:'2-digit'})}</div>
-                                            <span class={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${log.type === 'sortie' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                                                {log.type === 'sortie' ? 'Sortie' : 'Entrée'}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <ul class="text-sm space-y-1.5 bg-gray-50 p-3 rounded-lg border border-gray-100">
-                                        {log.articles && log.articles.map((art, idx) => (
-                                            <li key={idx} class="flex justify-between items-center">
-                                                <span>{art.nom} <span class="text-gray-400 text-xs ml-1">({art.format})</span></span>
-                                                <span class={`font-bold ${log.type === 'sortie' ? 'text-red-600' : 'text-emerald-600'}`}>{log.type === 'sortie' ? '-' : '+'}{art.quantite}</span>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                    
-                    {/* MODALE PIN PURGE */}
-                    {showPinPrompt && isMaster && (
-                        <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
-                            <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden">
-                                <div class="bg-red-600 text-white px-5 py-4 flex justify-between items-center">
-                                    <h2 class="text-lg font-bold"><i class="fa-solid fa-lock mr-2"></i>Purge de l'historique</h2>
-                                    <button onClick={() => setShowPinPrompt(false)} class="text-white hover:text-red-200"><i class="fa-solid fa-times text-xl"></i></button>
-                                </div>
-                                <form onSubmit={handleVerifyPinAndClear} class="p-6 space-y-5">
-                                    <p class="text-sm text-gray-600 text-center">Saisis le code secret Maître (Purge) pour effacer définitivement ce journal.</p>
-                                    <div><input autoFocus required type="password" pattern="[0-9]*" inputMode="numeric" maxLength="4" placeholder="Code à 4 chiffres" value={pinCode} onChange={e => setPinCode(e.target.value)} class="w-full border-2 border-red-500 rounded-lg p-3 text-2xl font-bold text-center outline-none tracking-[0.5em] focus:ring-2 focus:ring-red-400" /></div>
-                                    <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg shadow-md transition-colors">Valider et Effacer</button>
-                                </form>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            )
-        }
-
-        // ==========================================
-        // COMPOSANT ONGLET : GESTION DES CODES PIN BUREAU
-        // ==========================================
-        function SecuriteTab({ db, codesBureau, CODE_PURGE, isMaster }) {
-            const [newNom, setNewNom] = useState('');
-            const [newPin, setNewPin] = useState('');
-
-            const handleAddCode = (e) => {
-                e.preventDefault();
-                const trimmedPin = newPin.trim();
-                if (trimmedPin.length !== 4) return alert("Le code PIN doit comporter exactement 4 chiffres.");
-                if (trimmedPin === CODE_PURGE) return alert("Ce code est réservé au Code Maître (Purge). Choisissez un autre code.");
-                
-                const exists = Object.values(codesBureau).some(c => c.pin === trimmedPin);
-                if (exists) return alert("Ce code PIN existe déjà dans la liste.");
-
-                db.ref('parametres/codesBureau').push({
-                    nom: newNom.trim(),
-                    pin: trimmedPin
-                });
-                
-                alert(`Le code d'accès Bureau pour "${newNom}" a été créé avec succès.`);
-                setNewNom('');
-                setNewPin('');
-            };
-
-            const handleDeleteCode = (id, nom) => {
-                const totalCodes = Object.keys(codesBureau).length;
-                if (totalCodes <= 1) return alert("Vous ne pouvez pas supprimer le dernier code d'accès au Bureau !");
-                if (confirm(`Supprimer l'accès Bureau pour "${nom}" ?`)) {
-                    db.ref(`parametres/codesBureau/${id}`).remove();
-                }
-            };
-
-            return (
-                <div class="max-w-4xl mx-auto">
-                    <div class="mb-6">
-                        <h2 class="text-2xl font-bold text-pompier-navy">Sécurité et Accès Bureau</h2>
-                        <p class="text-sm text-gray-500 mt-1">
-                            {isMaster ? "Tu es connecté avec le Code Maître. Tu peux gérer l'intégralité des accès au Bureau." : "Tu es connecté en mode Bureau standard. Tu peux créer ton propre code de connexion."}
-                        </p>
-                    </div>
-
-                    <div class={`grid grid-cols-1 ${isMaster ? 'md:grid-cols-3' : 'max-w-md mx-auto'} gap-6`}>
-                        {/* Formulaire d'ajout - VISIBLE PAR TOUS LES MEMBRES DU BUREAU */}
-                        <div class="md:col-span-1 bg-white p-5 rounded-xl shadow-sm border border-gray-200 self-start">
-                            <h3 class="font-bold text-lg text-pompier-navy mb-4"><i class="fa-solid fa-key mr-2"></i>Nouveau code</h3>
-                            <form onSubmit={handleAddCode} class="space-y-4">
-                                <div>
-                                    <label class="block text-xs font-bold text-gray-600 mb-1">Nom / Fonction</label>
-                                    <input required type="text" placeholder="ex: Président, Trésorier, Cédric..." value={newNom} onChange={e => setNewNom(e.target.value)} class="w-full border rounded-lg p-2 text-sm outline-none focus:border-pompier-navy" />
-                                </div>
-                                <div>
-                                    <label class="block text-xs font-bold text-gray-600 mb-1">Nouveau Code PIN (4 chiffres)</label>
-                                    <input required type="password" pattern="[0-9]*" inputMode="numeric" maxLength="4" placeholder="****" value={newPin} onChange={e => setNewPin(e.target.value)} class="w-full border rounded-lg p-2 text-center text-lg font-bold tracking-[0.2em] outline-none focus:border-pompier-navy" />
-                                </div>
-                                <button type="submit" class="w-full bg-pompier-navy hover:bg-blue-900 text-white font-bold py-2 rounded-lg transition-colors text-sm shadow-sm">
-                                    <i class="fa-solid fa-plus mr-1"></i> Créer ce code
-                                </button>
-                            </form>
-                        </div>
-
-                        {/* Message d'information pour le bureau standard */}
-                        {!isMaster && (
-                            <div class="mt-2 p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-pompier-navy flex items-start space-x-3">
-                                <i class="fa-solid fa-circle-info mt-0.5 text-blue-500 text-lg"></i>
-                                <div>
-                                    <p class="font-bold mb-1">Affichage sécurisé</p>
-                                    <p>Pour des raisons de sécurité, la liste des codes existants et leur suppression sont réservées au détenteur du Code Maître.</p>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Liste des codes - VISIBLE UNIQUEMENT PAR LE MASTER */}
-                        {isMaster && (
-                            <div class="md:col-span-2 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                                <div class="bg-gray-50 px-5 py-3 border-b border-gray-200">
-                                    <h3 class="font-bold text-gray-700">Codes actuellement autorisés</h3>
-                                </div>
-                                <div class="divide-y divide-gray-100">
-                                    {Object.entries(codesBureau).map(([id, data]) => (
-                                        <div key={id} class="flex justify-between items-center px-5 py-4 hover:bg-gray-50">
-                                            <div class="flex items-center space-x-3">
-                                                <div class="w-10 h-10 rounded-full bg-blue-100 text-pompier-navy flex items-center justify-center font-bold text-xl">
-                                                    <i class="fa-solid fa-user-shield text-sm"></i>
-                                                </div>
-                                                <div>
-                                                    <p class="font-bold text-gray-800">{data.nom}</p>
-                                                    <p class="text-xs text-gray-500 font-mono">PIN: {data.pin}</p>
-                                                </div>
-                                            </div>
-                                            <button onClick={() => handleDeleteCode(id, data.nom)} class="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors" title="Supprimer ce code">
-                                                <i class="fa-solid fa-trash"></i>
-                                            </button>
-                                        </div>
-                                    ))}
-
-                                    {/* Affiche le code maître fixe pour info (impossible à supprimer ici) */}
-                                    <div class="flex justify-between items-center px-5 py-4 bg-gray-50 border-t-2 border-gray-200 opacity-60">
-                                        <div class="flex items-center space-x-3">
-                                            <div class="w-10 h-10 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center font-bold text-xl">
-                                                <i class="fa-solid fa-crown text-sm"></i>
-                                            </div>
-                                            <div>
-                                                <p class="font-bold text-gray-700">Code Maître & Purge</p>
-                                                <p class="text-xs text-gray-500 italic">Codé en dur dans l'application</p>
-                                            </div>
-                                        </div>
-                                        <div class="text-xs text-gray-400 px-2"><i class="fa-solid fa-lock"></i></div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            );
-        }
-
-        // ==========================================
-        // COMPOSANT MODALE : PRÉPARATION COMMANDE
-        // ==========================================
-        function OrderModal({ onClose, stock, fournisseurs }) {
-            const [orderQties, setOrderQties] = useState({});
-            const toOrder = stock.filter(item => item.quantite <= item.seuil);
-            
-            useEffect(() => {
-                const initial = {};
-                toOrder.forEach(item => { initial[item.id] = (item.seuil - item.quantite) + 2; });
-                setOrderQties(initial);
-            }, []);
-
-            const adjustQty = (id, amount) => { setOrderQties(prev => ({ ...prev, [id]: Math.max(0, (prev[id] || 0) + amount) })); };
-
-            const groupedOrders = {};
-            toOrder.forEach(item => {
-                const fId = item.fournisseurId || 'unassigned';
-                if (!groupedOrders[fId]) groupedOrders[fId] = [];
-                groupedOrders[fId].push(item);
+          if ((dbRef.current || activeRestUrl.current) && cloudStatus === 'connected' && navigator.onLine) {
+            writeDataToCloud({
+              transactions,
+              accounts,
+              categories,
+              suppliers,
+              automations,
+              closedYears,
+              manuallyOpenedYears,
+              updatedAt: nowIso
+            }).then(() => {
+              localStorage.setItem('sp_rieumes_pending_sync', 'false');
+              setPendingOfflineSync(false);
+            }).catch(() => {
+              localStorage.setItem('sp_rieumes_pending_sync', 'true');
+              setPendingOfflineSync(true);
+              setCloudStatus('offline');
             });
-
-            const generateText = (items) => {
-                let lines = [];
-                items.forEach(item => {
-                    if (orderQties[item.id] > 0) lines.push(`- ${orderQties[item.id]}x ${item.nom} (${item.format})`);
-                });
-                return lines.join('\n');
-            };
-
-            const handleEmail = (fId, items) => {
-                const fData = fournisseurs[fId];
-                if (!fData || !fData.email) return alert("Adresse e-mail non renseignée pour ce fournisseur.");
-                const list = generateText(items);
-                if (!list) return alert("Aucune quantité sélectionnée.");
-                const body = `Bonjour,\n\nVoici notre commande pour l'Amicale des Sapeurs-Pompiers de Rieumes :\n\n${list}\n\nMerci de nous confirmer la préparation de cette commande.\n\nCordialement,\nLe Bureau de l'Amicale`;
-                window.location.href = `mailto:${fData.email}?subject=Commande Amicale SP Rieumes&body=${encodeURIComponent(body)}`;
-            };
-
-            const handleSMS = (fId, items) => {
-                const fData = fournisseurs[fId];
-                if (!fData || !fData.tel) return alert("Numéro de téléphone non renseigné pour ce fournisseur.");
-                const list = generateText(items);
-                if (!list) return alert("Aucune quantité sélectionnée.");
-                const body = `Commande Amicale SP Rieumes :\n${list}\n\nMerci ! (Le Bureau)`;
-                const cleanPhone = fData.tel.replace(/\s+/g, '');
-                window.location.href = `sms:${cleanPhone}?body=${encodeURIComponent(body)}`;
-            };
-
-            return (
-                <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
-                    <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col">
-                        <div class="bg-pompier-red text-white px-6 py-4 flex justify-between items-center shrink-0">
-                            <h2 class="text-xl font-bold"><i class="fa-solid fa-paper-plane mr-2"></i> Préparation des commandes</h2>
-                            <button onClick={onClose} class="text-white hover:text-gray-200"><i class="fa-solid fa-times text-xl"></i></button>
-                        </div>
-                        <div class="p-6 overflow-y-auto">
-                            {toOrder.length === 0 ? (
-                                <p class="text-center text-gray-500 py-8 font-bold">Aucun produit en rupture, tout est au vert !</p>
-                            ) : (
-                                Object.keys(groupedOrders).map(fId => {
-                                    const items = groupedOrders[fId];
-                                    const fData = fId === 'unassigned' ? { nom: "Sans Fournisseur Associé" } : fournisseurs[fId];
-                                    
-                                    return (
-                                        <div key={fId} class="bg-gray-50 p-4 rounded-lg mb-6 border border-gray-200 shadow-sm">
-                                            <h3 class="font-bold text-pompier-navy mb-4 text-lg border-b pb-2">{fData.nom}</h3>
-                                            
-                                            {items.map(item => (
-                                                <div key={item.id} class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0">
-                                                    <div class="flex flex-col">
-                                                        <span class="font-semibold text-gray-800">{item.nom}</span>
-                                                        <div class="flex items-center space-x-2 text-xs">
-                                                            <span class="bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded">{item.format}</span>
-                                                            <span class="text-red-500">Stock actuel : {item.quantite}</span>
-                                                        </div>
-                                                    </div>
-                                                    <div class="flex items-center space-x-2 bg-white rounded border px-2 py-1 shadow-sm">
-                                                        <button onClick={() => adjustQty(item.id, -1)} class="w-6 h-6 text-gray-600 hover:text-pompier-red"><i class="fa-solid fa-minus text-xs"></i></button>
-                                                        <span class="w-8 text-center font-bold text-pompier-navy">{orderQties[item.id] || 0}</span>
-                                                        <button onClick={() => adjustQty(item.id, 1)} class="w-6 h-6 text-gray-600 hover:text-green-600"><i class="fa-solid fa-plus text-xs"></i></button>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                            
-                                            {fId !== 'unassigned' && (
-                                                <div class="mt-4 pt-4 border-t border-gray-200 flex flex-col sm:flex-row gap-2">
-                                                    <button onClick={() => handleEmail(fId, items)} class={`flex-1 py-2 rounded font-bold shadow flex justify-center items-center text-sm ${fData.email ? 'bg-pompier-red text-white hover:bg-red-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}><i class="fa-solid fa-envelope mr-2"></i> E-mail</button>
-                                                    <button onClick={() => handleSMS(fId, items)} class={`flex-1 py-2 rounded font-bold shadow flex justify-center items-center text-sm ${fData.tel ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}><i class="fa-solid fa-mobile-screen-button mr-2"></i> SMS</button>
-                                                    {fData.siteWeb && (
-                                                        <a href={fData.siteWeb.startsWith('http') ? fData.siteWeb : `https://${fData.siteWeb}`} target="_blank" rel="noopener noreferrer" class="flex-1 py-2 rounded font-bold shadow flex justify-center items-center text-sm bg-pompier-navy text-white hover:bg-blue-900 transition-colors">
-                                                            <i class="fa-solid fa-globe mr-2"></i> Site web
-                                                        </a>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </div>
-                                    )
-                                })
-                            )}
-                        </div>
-                    </div>
-                </div>
-            );
+          } else {
+            localStorage.setItem('sp_rieumes_pending_sync', 'true');
+            setPendingOfflineSync(true);
+          }
         }
+      }, [transactions, accounts, categories, suppliers, automations, closedYears, manuallyOpenedYears, isAuthenticated]);
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
+      const forcePushToCloud = () => {
+        const nowIso = new Date().toISOString();
+        writeDataToCloud({
+          transactions,
+          accounts,
+          categories,
+          suppliers,
+          automations,
+          closedYears,
+          manuallyOpenedYears,
+          updatedAt: nowIso
+        }).then(() => {
+          localStorage.setItem('sp_rieumes_updatedAt', nowIso);
+          localStorage.setItem('sp_rieumes_pending_sync', 'false');
+          setPendingOfflineSync(false);
+          setCloudStatus('connected');
+        }).catch(() => {
+          setCloudStatus('error');
+        });
+      };
+
+      const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+      const [isAddAutomationOpen, setIsAddAutomationOpen] = useState(false);
+      const [editModalTx, setEditModalTx] = useState(null);
+      const [restoreData, setRestoreData] = useState(null);
+      
+      // États du Bilan Annuel (Catégorie ou Fournisseur)
+      const [balanceGroupBy, setBalanceGroupBy] = useState('category'); // 'category' | 'supplier'
+      const [balanceViewMode, setBalanceViewMode] = useState('global'); // 'global' | 'detailed'
+      const [balanceItemFilter, setBalanceItemFilter] = useState('all');
+      const [balanceTypeFilter, setBalanceTypeFilter] = useState('all');
+
+      const [newAccountName, setNewAccountName] = useState('');
+      const [newCategoryName, setNewCategoryName] = useState('');
+      const [newSupplierName, setNewSupplierName] = useState('');
+
+      const [inlineTx, setInlineTx] = useState({
+        date: new Date().toISOString().split('T')[0],
+        accountId: '',
+        description: '',
+        supplier: '',
+        category: '',
+        paymentMethod: 'CB',
+        checkNumber: '',
+        type: 'expense',
+        amount: ''
+      });
+
+      const formatCurrency = (amount) => {
+        return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(amount);
+      };
+
+      const availableYears = useMemo(() => {
+        const years = new Set(transactions.map(tx => tx.date.split('-')[0]));
+        years.add(new Date().getFullYear().toString());
+        manuallyOpenedYears.forEach(y => years.add(y));
+        const maxYear = Math.max(...Array.from(years).map(Number));
+        if (closedYears.includes(maxYear.toString())) {
+          years.add((maxYear + 1).toString());
+        }
+        return Array.from(years).sort().reverse();
+      }, [transactions, closedYears, manuallyOpenedYears]);
+
+      useEffect(() => {
+        if (!availableYears.includes(currentYear) && availableYears.length > 0) {
+          setCurrentYear(availableYears[0]);
+        }
+      }, [availableYears, currentYear]);
+
+      useEffect(() => {
+        if (currentAccountId !== 'all') {
+          setInlineTx(prev => ({ ...prev, accountId: currentAccountId }));
+        } else if (!inlineTx.accountId && accounts.length > 0) {
+          setInlineTx(prev => ({ ...prev, accountId: accounts[0].id }));
+        }
+      }, [accounts, currentAccountId, inlineTx.accountId]);
+
+      const ensureCategoryAndSupplierExist = (catName, supName) => {
+        const cleanCat = (catName || '').trim();
+        const cleanSup = (supName || '').trim();
+        if (cleanCat && !categories.some(c => c.name.toLowerCase() === cleanCat.toLowerCase())) {
+          setCategories(prev => [...prev, { id: 'cat_' + Date.now(), name: cleanCat }]);
+        }
+        if (cleanSup && !suppliers.some(s => s.name.toLowerCase() === cleanSup.toLowerCase())) {
+          setSuppliers(prev => [...prev, { id: 'sup_' + Date.now(), name: cleanSup }]);
+        }
+      };
+
+      const filteredTransactions = useMemo(() => {
+        return transactions
+          .filter(tx => tx.date.startsWith(currentYear))
+          .filter(tx => currentAccountId === 'all' || tx.accountId === currentAccountId)
+          .sort((a, b) => new Date(b.date) - new Date(a.date));
+      }, [transactions, currentYear, currentAccountId]);
+
+      const isCurrentYearClosed = closedYears.includes(currentYear);
+
+      const balances = useMemo(() => {
+        let pointed = 0;
+        let unpointed = 0;
+        const relevantTransactions = currentAccountId === 'all' 
+          ? transactions 
+          : transactions.filter(tx => tx.accountId === currentAccountId);
+
+        relevantTransactions.forEach(tx => {
+          const modifier = tx.type === 'income' ? 1 : -1;
+          if (tx.reconciled) pointed += tx.amount * modifier;
+          else unpointed += tx.amount * modifier;
+        });
+        return { pointed, unpointed, theoretical: pointed + unpointed };
+      }, [transactions, currentAccountId]);
+
+      const accountBalances = useMemo(() => {
+        const balancesByAccount = {};
+        accounts.forEach(acc => {
+          balancesByAccount[acc.id] = { pointed: 0, unpointed: 0, theoretical: 0 };
+        });
+
+        transactions.forEach(tx => {
+          if (balancesByAccount[tx.accountId]) {
+            const modifier = tx.type === 'income' ? 1 : -1;
+            if (tx.reconciled) balancesByAccount[tx.accountId].pointed += tx.amount * modifier;
+            else balancesByAccount[tx.accountId].unpointed += tx.amount * modifier;
+            balancesByAccount[tx.accountId].theoretical += tx.amount * modifier;
+          }
+        });
+        return balancesByAccount;
+      }, [transactions, accounts]);
+
+      const categorySummary = useMemo(() => {
+        const summary = {};
+        categories.forEach(cat => {
+          summary[cat.name] = { income: 0, expense: 0, total: 0 };
+        });
+        
+        filteredTransactions.forEach(tx => {
+          const catName = tx.category || 'Non catégorisé';
+          if (!summary[catName]) {
+            summary[catName] = { income: 0, expense: 0, total: 0 };
+          }
+          if (tx.type === 'income') {
+            summary[catName].income += tx.amount;
+            summary[catName].total += tx.amount;
+          } else {
+            summary[catName].expense += tx.amount;
+            summary[catName].total -= tx.amount;
+          }
+        });
+        return summary;
+      }, [filteredTransactions, categories]);
+
+      const supplierSummary = useMemo(() => {
+        const summary = {};
+        suppliers.forEach(sup => {
+          summary[sup.name] = { income: 0, expense: 0, total: 0 };
+        });
+        
+        filteredTransactions.forEach(tx => {
+          const supName = (tx.supplier || '').trim() || 'Non renseigné';
+          if (!summary[supName]) {
+            summary[supName] = { income: 0, expense: 0, total: 0 };
+          }
+          if (tx.type === 'income') {
+            summary[supName].income += tx.amount;
+            summary[supName].total += tx.amount;
+          } else {
+            summary[supName].expense += tx.amount;
+            summary[supName].total -= tx.amount;
+          }
+        });
+        return summary;
+      }, [filteredTransactions, suppliers]);
+
+      const activeSummary = balanceGroupBy === 'category' ? categorySummary : supplierSummary;
+
+      const reportANouveau = useMemo(() => {
+        const relevantTransactions = currentAccountId === 'all' 
+          ? transactions 
+          : transactions.filter(tx => tx.accountId === currentAccountId);
+
+        return relevantTransactions
+          .filter(tx => tx.date.localeCompare(`${currentYear}-01-01`) < 0)
+          .reduce((acc, tx) => acc + (tx.type === 'income' ? tx.amount : -tx.amount), 0);
+      }, [transactions, currentAccountId, currentYear]);
+
+      // Actions
+      const addTransaction = (tx) => {
+        ensureCategoryAndSupplierExist(tx.category, tx.supplier);
+        setTransactions(prev => [{ ...tx, id: Date.now().toString() }, ...prev]);
+        setIsAddModalOpen(false);
+      };
+
+      const handleEditTransaction = (updatedTx) => {
+        ensureCategoryAndSupplierExist(updatedTx.category, updatedTx.supplier);
+        setTransactions(prev => prev.map(tx => tx.id === updatedTx.id ? updatedTx : tx));
+        setEditModalTx(null);
+      };
+
+      const deleteTransaction = (id) => {
+        setTransactions(prev => prev.filter(tx => tx.id !== id));
+      };
+
+      const toggleReconciled = (id) => {
+        setTransactions(prev => prev.map(tx => 
+          tx.id === id ? { ...tx, reconciled: !tx.reconciled } : tx
+        ));
+      };
+
+      const handleInlineSubmit = () => {
+        if (!inlineTx.amount || !inlineTx.description || !inlineTx.accountId || !inlineTx.category) return;
+        ensureCategoryAndSupplierExist(inlineTx.category, inlineTx.supplier);
+        const newTx = {
+          id: Date.now().toString(),
+          type: inlineTx.type,
+          amount: parseFloat(inlineTx.amount),
+          description: inlineTx.description,
+          supplier: inlineTx.supplier.trim(),
+          category: inlineTx.category.trim(),
+          date: inlineTx.date,
+          accountId: inlineTx.accountId,
+          paymentMethod: inlineTx.paymentMethod,
+          checkNumber: inlineTx.paymentMethod === 'Chèque' ? inlineTx.checkNumber.trim() : null,
+          receiptUrl: null,
+          reconciled: false
+        };
+        setTransactions(prev => [newTx, ...prev]);
+        setInlineTx(prev => ({ ...prev, description: '', supplier: '', category: '', amount: '', checkNumber: '' }));
+      };
+
+      const addAutomation = (automation) => {
+        ensureCategoryAndSupplierExist(automation.category, automation.supplier);
+        setAutomations(prev => [...prev, { ...automation, id: Date.now().toString() }]);
+        setIsAddAutomationOpen(false);
+      };
+
+      const deleteAutomation = (id) => {
+        setAutomations(prev => prev.filter(a => a.id !== id));
+      };
+
+      const addAccount = (e) => {
+        e.preventDefault();
+        if (newAccountName.trim()) {
+          setAccounts(prev => [...prev, { id: 'acc' + Date.now(), name: newAccountName.trim() }]);
+          setNewAccountName('');
+        }
+      };
+
+      const deleteAccount = (id) => {
+        if (accounts.length > 1) {
+          setAccounts(prev => prev.filter(a => a.id !== id));
+          if (currentAccountId === id) setCurrentAccountId('all');
+        }
+      };
+
+      const addCategory = (e) => {
+        e.preventDefault();
+        if (newCategoryName.trim()) {
+          setCategories(prev => [...prev, { id: 'cat' + Date.now(), name: newCategoryName.trim() }]);
+          setNewCategoryName('');
+        }
+      };
+
+      const deleteCategory = (id) => {
+        if (categories.length > 1) {
+          setCategories(prev => prev.filter(c => c.id !== id));
+        }
+      };
+
+      const addSupplier = (e) => {
+        e.preventDefault();
+        if (newSupplierName.trim()) {
+          setSuppliers(prev => [...prev, { id: 'sup' + Date.now(), name: newSupplierName.trim() }]);
+          setNewSupplierName('');
+        }
+      };
+
+      const deleteSupplier = (id) => {
+        setSuppliers(prev => prev.filter(s => s.id !== id));
+      };
+
+      const toggleYearClosure = (year) => {
+        if (closedYears.includes(year)) {
+          setClosedYears(prev => prev.filter(y => y !== year));
+        } else {
+          setClosedYears(prev => [...prev, year]);
+        }
+      };
+
+      const exportCSV = () => {
+        const separator = ';';
+        let csvContent = '\uFEFF'; 
+        csvContent += `BILAN FINANCIER ${currentYear} - Amicale SP Rieumes\n\n`;
+        csvContent += `RÉSUMÉ PAR CATÉGORIE\n`;
+        csvContent += `Catégorie${separator}Recettes${separator}Dépenses${separator}Solde\n`;
+        
+        Object.entries(categorySummary).forEach(([cat, data]) => {
+          csvContent += `${cat}${separator}${data.income.toString().replace('.', ',')}${separator}${data.expense.toString().replace('.', ',')}${separator}${data.total.toString().replace('.', ',')}\n`;
+        });
+
+        csvContent += `\nRÉSUMÉ PAR FOURNISSEUR / TIERS\n`;
+        csvContent += `Fournisseur / Tiers${separator}Recettes${separator}Dépenses${separator}Solde\n`;
+        Object.entries(supplierSummary).forEach(([sup, data]) => {
+          if (data.income > 0 || data.expense > 0) {
+            csvContent += `${sup}${separator}${data.income.toString().replace('.', ',')}${separator}${data.expense.toString().replace('.', ',')}${separator}${data.total.toString().replace('.', ',')}\n`;
+          }
+        });
+        
+        const totalInc = Object.values(categorySummary).reduce((acc, curr) => acc + curr.income, 0);
+        const totalExp = Object.values(categorySummary).reduce((acc, curr) => acc + curr.expense, 0);
+        const totalSolde = Object.values(categorySummary).reduce((acc, curr) => acc + curr.total, 0);
+        
+        csvContent += `\nTOTAL DES MOUVEMENTS${separator}${totalInc.toString().replace('.', ',')}${separator}${totalExp.toString().replace('.', ',')}${separator}${totalSolde.toString().replace('.', ',')}\n`;
+        csvContent += `Report à nouveau${separator}${separator}${separator}${reportANouveau.toString().replace('.', ',')}\n`;
+        csvContent += `SOLDE FINAL (Avec report)${separator}${separator}${separator}${(reportANouveau + totalSolde).toString().replace('.', ',')}\n\n\n`;
+        csvContent += `DÉTAIL DES OPÉRATIONS\n`;
+        const headers = ['Date', 'Compte', 'Libellé', 'Fournisseur / Tiers', 'Catégorie', 'Mode', 'N° Chèque', 'Type', 'Montant', 'Pointé'];
+        csvContent += headers.join(separator) + '\n';
+
+        const rows = filteredTransactions.map(tx => [
+          new Date(tx.date).toLocaleDateString('fr-FR'),
+          accounts.find(a => a.id === tx.accountId)?.name || '-',
+          `"${(tx.description || '').replace(/"/g, '""')}"`,
+          `"${(tx.supplier || '-').replace(/"/g, '""')}"`,
+          tx.category,
+          tx.paymentMethod || '-',
+          tx.checkNumber ? `"${tx.checkNumber}"` : '-',
+          tx.type === 'income' ? 'Recette' : 'Dépense',
+          tx.amount.toString().replace('.', ','),
+          tx.reconciled ? 'Oui' : 'Non'
+        ]);
+        csvContent += rows.map(e => e.join(separator)).join("\n");
+          
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.setAttribute("href", url);
+        link.setAttribute("download", `Bilan_SP_Rieumes_${currentYear}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
+
+      const exportBackup = () => {
+        const data = { transactions, accounts, categories, suppliers, automations, closedYears, manuallyOpenedYears, exportDate: new Date().toISOString() };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `sauvegarde_tresorerie_${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
+
+      const handleFileUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const data = JSON.parse(event.target.result);
+            if (data.transactions && data.accounts) setRestoreData(data);
+          } catch (err) {
+            console.error("Erreur de lecture", err);
+          }
+        };
+        reader.readAsText(file);
+        e.target.value = '';
+      };
+
+      const confirmRestore = () => {
+        if (restoreData) {
+          setTransactions(restoreData.transactions || []);
+          setAccounts(restoreData.accounts || []);
+          setCategories(restoreData.categories || []);
+          if (restoreData.suppliers) setSuppliers(restoreData.suppliers);
+          setAutomations(restoreData.automations || []);
+          setClosedYears(restoreData.closedYears || []);
+          setManuallyOpenedYears(restoreData.manuallyOpenedYears || []);
+          setRestoreData(null);
+        }
+      };
+
+      const handleNavClick = (tabId) => {
+        setActiveTab(tabId);
+        setIsMobileMenuOpen(false);
+        if (tabId === 'transactions' && !hasSelectedAccountOnce) {
+          setIsAccountPickerOpen(true);
+        }
+      };
+
+      const navItems = [
+        { id: 'dashboard', label: 'Tableau de Bord', icon: LayoutDashboard },
+        { id: 'transactions', label: 'Livre de Comptes', icon: List },
+        { id: 'balance', label: 'Bilan Annuel', icon: FileText },
+        { id: 'automations', label: 'Automatisations', icon: Repeat },
+        { id: 'settings', label: 'Paramètres', icon: Settings }
+      ];
+
+      const filteredSummaryEntries = Object.entries(activeSummary).filter(([itemKey, data]) => {
+        if (balanceItemFilter !== 'all' && itemKey !== balanceItemFilter) return false;
+        if (balanceTypeFilter === 'income' && data.income === 0) return false;
+        if (balanceTypeFilter === 'expense' && data.expense === 0) return false;
+        if (balanceItemFilter === 'all' && data.income === 0 && data.expense === 0) return false;
+        return true;
+      });
+
+      const sumIncome = filteredSummaryEntries.reduce((acc, [_, data]) => acc + data.income, 0);
+      const sumExpense = filteredSummaryEntries.reduce((acc, [_, data]) => acc + data.expense, 0);
+      const sumTotal = filteredSummaryEntries.reduce((acc, [_, data]) => acc + data.total, 0);
+
+      const currentAccountName = currentAccountId === 'all' 
+        ? 'Tous les comptes (Cumul)' 
+        : (accounts.find(a => a.id === currentAccountId)?.name || 'Compte');
+
+      if (!isAuthenticated) {
+        return (
+          <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-4">
+            <div className="bg-gray-900 border border-gray-800 p-8 rounded-3xl w-full max-w-md shadow-2xl flex flex-col items-center">
+              <div className="bg-red-600 p-4 rounded-2xl shadow-lg shadow-red-600/20 mb-6">
+                <Flame className="w-10 h-10 text-white" />
+              </div>
+              <h1 className="text-2xl font-bold text-white mb-2 text-center tracking-tight">Amicale SP Rieumes</h1>
+              <p className="text-gray-400 mb-8 text-center text-sm font-medium">Accès sécurisé à la trésorerie</p>
+              <form onSubmit={(e) => { 
+                e.preventDefault(); 
+                if (checkPassword(passwordInput)) { 
+                  setIsAuthenticated(true); 
+                  setPasswordError(false); 
+                } else { 
+                  setPasswordError(true); 
+                } 
+              }} className="w-full space-y-5">
+                <div>
+                  <input type="password" placeholder="Mot de passe d'accès" value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} className={`w-full bg-gray-950 border ${passwordError ? 'border-red-500' : 'border-gray-700'} rounded-xl p-4 text-white outline-none focus:border-red-500 transition-all text-center text-lg tracking-widest`} />
+                  {passwordError && <p className="text-red-500 text-xs mt-2 text-center font-medium">Mot de passe incorrect.</p>}
+                </div>
+                <button type="submit" className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-4 px-4 rounded-xl transition-colors flex items-center justify-center shadow-lg shadow-red-600/20">
+                  <Lock className="w-5 h-5 mr-2" /> Déverrouiller
+                </button>
+              </form>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="min-h-screen bg-gray-950 text-gray-100 font-sans">
+          <div className="flex h-screen overflow-hidden">
+            {/* SIDEBAR DESKTOP */}
+            <aside className="hidden md:flex w-64 flex-col bg-gray-900 border-r border-gray-800 print:hidden">
+              <div className="p-6 flex items-center space-x-3">
+                <div className="bg-red-600 p-2 rounded-xl shadow-lg shadow-red-600/20 flex-shrink-0">
+                  <Flame className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-lg font-bold text-white tracking-tight leading-tight">Trésorerie Amicale</h1>
+                  <p className="text-xs text-red-400 font-medium mt-0.5">Sapeurs-Pompiers de Rieumes</p>
+                </div>
+              </div>
+              <nav className="flex-1 px-4 py-4 space-y-2">
+                {navItems.map((item) => (
+                  <button key={item.id} onClick={() => handleNavClick(item.id)} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${activeTab === item.id ? 'bg-red-600 text-white shadow-md shadow-red-600/10' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}>
+                    <item.icon className="w-5 h-5" />
+                    <span className="font-medium">{item.label}</span>
+                  </button>
+                ))}
+              </nav>
+              <div className="p-4 space-y-3 border-t border-gray-800">
+                <div className={`flex flex-col items-center justify-center p-2.5 rounded-xl text-xs font-medium border ${
+                  cloudStatus === 'connected' && !pendingOfflineSync ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                  cloudStatus === 'offline' || pendingOfflineSync ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                  cloudStatus === 'error' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                  'bg-gray-800 text-gray-400 border-gray-700'
+                }`}>
+                  <div className="flex items-center space-x-2">
+                    <span className={`w-2 h-2 rounded-full ${
+                      cloudStatus === 'connected' && !pendingOfflineSync ? 'bg-emerald-400 animate-pulse' :
+                      cloudStatus === 'offline' || pendingOfflineSync ? 'bg-amber-400 animate-pulse' :
+                      cloudStatus === 'error' ? 'bg-red-500' : 'bg-yellow-400 animate-pulse'
+                    }`}></span>
+                    <span>
+                      {cloudStatus === 'connected' && !pendingOfflineSync ? 'Synchronisé (Firebase)' :
+                       pendingOfflineSync ? 'Sauvegardé sur PC (Attente réseau)' :
+                       cloudStatus === 'offline' ? 'Hors-ligne (Sauvegarde PC active)' :
+                       cloudStatus === 'error' ? 'Mode Local (Vérifier Règles)' :
+                       'Connexion Firebase...'}
+                    </span>
+                  </div>
+                  {pendingOfflineSync && cloudStatus === 'connected' && (
+                    <button onClick={forcePushToCloud} className="mt-1.5 text-[11px] underline text-amber-300 hover:text-white">
+                      Synchroniser maintenant
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500 text-center font-medium">
+                  © {new Date().getFullYear()} - Amicale SP Rieumes<br/>Laurent Basque
+                </p>
+              </div>
+            </aside>
+
+            {/* HEADER MOBILE */}
+            <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-gray-900 border-b border-gray-800 flex items-center justify-between px-4 z-40 print:hidden">
+              <div className="flex items-center space-x-2 overflow-hidden mr-2">
+                 <Flame className="w-6 h-6 text-red-500 flex-shrink-0" />
+                 <h1 className="text-base font-bold text-white truncate">Trésorerie Amicale SP Rieumes</h1>
+              </div>
+              <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="text-gray-400 flex-shrink-0">
+                {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+              </button>
+            </div>
+
+            {isMobileMenuOpen && (
+              <div className="md:hidden fixed inset-0 top-16 bg-gray-900 z-30 flex flex-col p-4 print:hidden">
+                 <div className="flex-1 space-y-2 overflow-y-auto">
+                   {navItems.map((item) => (
+                    <button key={item.id} onClick={() => handleNavClick(item.id)} className={`w-full flex items-center space-x-3 px-4 py-4 rounded-xl transition-all ${activeTab === item.id ? 'bg-red-600 text-white' : 'text-gray-400'}`}>
+                      <item.icon className="w-5 h-5" />
+                      <span className="font-medium text-lg">{item.label}</span>
+                    </button>
+                  ))}
+                 </div>
+              </div>
+            )}
+
+            {/* CONTENU PRINCIPAL */}
+            <main className="flex-1 flex flex-col h-full overflow-hidden w-full pt-16 md:pt-0">
+              <header className="bg-gray-900/50 backdrop-blur-sm border-b border-gray-800 p-4 flex flex-col sm:flex-row justify-between items-center z-10 print:hidden space-y-3 sm:space-y-0">
+                <div className="flex flex-wrap sm:flex-nowrap gap-3 w-full sm:w-auto">
+                  <button 
+                    onClick={() => setIsAccountPickerOpen(true)}
+                    className="flex items-center justify-between space-x-3 bg-gray-800 hover:bg-gray-750 border border-gray-700 hover:border-red-500/50 text-white px-4 py-2.5 rounded-xl transition-all shadow-sm flex-1 sm:flex-initial group"
+                  >
+                    <div className="flex items-center space-x-2.5">
+                      <div className="bg-red-500/10 text-red-400 p-1.5 rounded-lg group-hover:bg-red-600 group-hover:text-white transition-colors">
+                        <CreditCard className="w-4 h-4" />
+                      </div>
+                      <div className="text-left">
+                        <span className="block text-[10px] uppercase tracking-wider text-gray-400 font-semibold leading-none mb-0.5">Compte actif</span>
+                        <span className="text-sm font-bold text-white">{currentAccountName}</span>
+                      </div>
+                    </div>
+                    <ChevronDown className="w-4 h-4 text-gray-400 group-hover:text-white transition-colors" />
+                  </button>
+
+                  <button 
+                    onClick={() => setIsYearPickerOpen(true)}
+                    className="flex items-center justify-between space-x-3 bg-gray-800 hover:bg-gray-750 border border-gray-700 hover:border-red-500/50 text-white px-4 py-2.5 rounded-xl transition-all shadow-sm group"
+                  >
+                    <div className="flex items-center space-x-2.5">
+                      <div className="bg-blue-500/10 text-blue-400 p-1.5 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                        <Calendar className="w-4 h-4" />
+                      </div>
+                      <div className="text-left">
+                        <span className="block text-[10px] uppercase tracking-wider text-gray-400 font-semibold leading-none mb-0.5">Exercice</span>
+                        <span className="text-sm font-bold text-white flex items-center gap-1.5">
+                          {currentYear}
+                          {isCurrentYearClosed && <Lock className="w-3.5 h-3.5 text-yellow-500" />}
+                        </span>
+                      </div>
+                    </div>
+                    <ChevronDown className="w-4 h-4 text-gray-400 group-hover:text-white transition-colors" />
+                  </button>
+                </div>
+
+                {!isCurrentYearClosed && (
+                  <button onClick={() => setIsAddModalOpen(true)} className="w-full sm:w-auto flex items-center justify-center space-x-2 bg-red-600 hover:bg-red-700 text-white px-5 py-2.5 rounded-xl font-medium transition-colors shadow-lg shadow-red-600/20">
+                    <Plus className="w-5 h-5" /><span>Nouvelle Opération</span>
+                  </button>
+                )}
+              </header>
+
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+                <div className="max-w-[1600px] w-full mx-auto">
+                  
+                  {/* ONGLET 1 : TABLEAU DE BORD */}
+                  {activeTab === 'dashboard' && (
+                    <div className="space-y-6">
+                      {isCurrentYearClosed && (
+                        <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 p-4 rounded-xl flex items-center">
+                          <Lock className="w-6 h-6 mr-3 flex-shrink-0" />
+                          <div>
+                            <h4 className="font-bold">Exercice Clôturé</h4>
+                            <p className="text-sm">L'année {currentYear} est verrouillée.</p>
+                          </div>
+                        </div>
+                      )}
+                      <div>
+                        <h2 className="text-2xl font-bold text-white mb-6">Aperçu Financier ({currentAccountName})</h2>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                          <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl relative overflow-hidden">
+                            <div className="absolute top-0 right-0 p-4 opacity-10"><CheckCircle className="w-24 h-24" /></div>
+                            <p className="text-sm font-medium text-gray-400 mb-1">Solde Bancaire (Pointé)</p>
+                            <h3 className={`text-4xl font-bold ${balances.pointed >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{formatCurrency(balances.pointed)}</h3>
+                          </div>
+                          <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl relative overflow-hidden">
+                            <div className="absolute top-0 right-0 p-4 opacity-10"><Circle className="w-24 h-24" /></div>
+                            <p className="text-sm font-medium text-gray-400 mb-1">Opérations non pointées</p>
+                            <h3 className={`text-4xl font-bold ${balances.unpointed >= 0 ? 'text-blue-400' : 'text-yellow-500'}`}>{balances.unpointed > 0 ? '+' : ''}{formatCurrency(balances.unpointed)}</h3>
+                          </div>
+                          <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl relative overflow-hidden">
+                            <div className="absolute top-0 right-0 p-4 opacity-10"><LayoutDashboard className="w-24 h-24" /></div>
+                            <p className="text-sm font-medium text-gray-400 mb-1">Solde Théorique</p>
+                            <h3 className={`text-4xl font-bold ${balances.theoretical >= 0 ? 'text-white' : 'text-red-400'}`}>{formatCurrency(balances.theoretical)}</h3>
+                          </div>
+                        </div>
+                      </div>
+
+                      {accounts.length > 0 && (
+                        <div className="mt-8">
+                          <h3 className="text-lg font-bold text-white mb-4">Soldes par compte (cliquer pour ouvrir le Livre de Comptes)</h3>
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {accounts.map(acc => {
+                              const bal = accountBalances[acc.id] || { pointed: 0, unpointed: 0, theoretical: 0 };
+                              return (
+                                <div 
+                                  key={acc.id} 
+                                  onClick={() => { setCurrentAccountId(acc.id); setHasSelectedAccountOnce(true); setActiveTab('transactions'); }}
+                                  className="bg-gray-900 hover:bg-gray-800/80 cursor-pointer transition-all p-5 rounded-2xl border border-gray-800 hover:border-red-500/50 flex flex-col justify-between group"
+                                >
+                                  <div className="flex items-center justify-between mb-4">
+                                    <div className="flex items-center space-x-2.5">
+                                      <CreditCard className="w-5 h-5 text-red-500" />
+                                      <h4 className="font-bold text-gray-100 group-hover:text-white">{acc.name}</h4>
+                                    </div>
+                                    <span className="text-xs text-gray-500 group-hover:text-red-400">Ouvrir →</span>
+                                  </div>
+                                  <div className="flex justify-between items-end pt-2 border-t border-gray-800">
+                                    <div><p className="text-xs text-gray-500 mb-1">Pointé</p><p className={`font-bold text-lg ${bal.pointed >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{formatCurrency(bal.pointed)}</p></div>
+                                    <div className="text-right"><p className="text-xs text-gray-500 mb-1">Théorique</p><p className={`font-bold text-lg ${bal.theoretical >= 0 ? 'text-white' : 'text-red-400'}`}>{formatCurrency(bal.theoretical)}</p></div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ONGLET 2 : LIVRE DE COMPTES */}
+                  {activeTab === 'transactions' && (
+                    <div className="space-y-6">
+                      {/* BANDEAU DES SOLDES DU COMPTE TRAITÉ */}
+                      <div className="bg-gradient-to-br from-gray-900 via-gray-900 to-gray-950 border border-gray-800 rounded-2xl p-5 shadow-lg">
+                        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+                          <div className="flex items-center space-x-4">
+                            <div className="bg-red-600/20 border border-red-500/30 p-3.5 rounded-2xl text-red-400">
+                              <CreditCard className="w-7 h-7" />
+                            </div>
+                            <div>
+                              <span className="text-xs uppercase tracking-wider text-gray-400 font-semibold">Compte en cours de traitement</span>
+                              <div className="flex items-center space-x-3 mt-0.5">
+                                <h2 className="text-2xl font-extrabold text-white">{currentAccountName}</h2>
+                                <button 
+                                  onClick={() => setIsAccountPickerOpen(true)}
+                                  className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-200 px-3 py-1.5 rounded-lg border border-gray-700 transition-colors flex items-center space-x-1"
+                                >
+                                  <Repeat className="w-3.5 h-3.5 mr-1 text-red-400" />
+                                  <span>Changer de compte</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-3 w-full lg:w-auto">
+                            <div className="bg-gray-950/90 border border-gray-800 px-4 py-3 rounded-xl">
+                              <p className="text-xs text-gray-400">Solde Pointé</p>
+                              <p className={`text-lg sm:text-xl font-bold mt-0.5 ${balances.pointed >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {formatCurrency(balances.pointed)}
+                              </p>
+                            </div>
+                            <div className="bg-gray-950/90 border border-gray-800 px-4 py-3 rounded-xl">
+                              <p className="text-xs text-gray-400">Non Pointé</p>
+                              <p className={`text-lg sm:text-xl font-bold mt-0.5 ${balances.unpointed >= 0 ? 'text-blue-400' : 'text-yellow-400'}`}>
+                                {balances.unpointed > 0 ? '+' : ''}{formatCurrency(balances.unpointed)}
+                              </p>
+                            </div>
+                            <div className="bg-gray-950/90 border border-gray-700 px-4 py-3 rounded-xl">
+                              <p className="text-xs text-gray-300 font-medium">Solde Théorique</p>
+                              <p className={`text-lg sm:text-xl font-extrabold mt-0.5 ${balances.theoretical >= 0 ? 'text-white' : 'text-red-400'}`}>
+                                {formatCurrency(balances.theoretical)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* TABLEAU DES ÉCRITURES */}
+                      <div className="bg-gray-900 border border-gray-800 rounded-2xl shadow-sm overflow-visible">
+                        <div className="p-5 border-b border-gray-800 flex justify-between items-center">
+                          <h3 className="text-lg font-bold text-white">Écritures de l'exercice {currentYear}</h3>
+                          <span className="text-xs text-gray-400">{filteredTransactions.length} opération(s)</span>
+                        </div>
+                        
+                        <div className="overflow-x-auto pb-28">
+                          <table className="w-full text-sm text-left text-gray-300">
+                            <thead className="text-xs text-gray-400 uppercase bg-gray-950 border-b border-gray-800">
+                              <tr>
+                                <th className="px-3 py-3">Date</th>
+                                <th className="px-3 py-3">Compte</th>
+                                <th className="px-3 py-3">Libellé</th>
+                                <th className="px-3 py-3">Fournisseur / Tiers</th>
+                                <th className="px-3 py-3">Catégorie</th>
+                                <th className="px-3 py-3">Mode</th>
+                                <th className="px-3 py-3 text-right">Montant</th>
+                                <th className="px-3 py-3 text-center">Pointé</th>
+                                <th className="px-3 py-3 text-center print:hidden">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {!isCurrentYearClosed && (
+                                <tr className="bg-gray-800/40 border-b border-gray-700 print:hidden">
+                                  <td className="px-3 py-3"><input type="date" value={inlineTx.date} onChange={e => setInlineTx({...inlineTx, date: e.target.value})} className="bg-gray-900 border border-gray-700 rounded p-1.5 text-xs text-white w-full outline-none" /></td>
+                                  <td className="px-3 py-3">
+                                    {currentAccountId === 'all' ? (
+                                      <select value={inlineTx.accountId} onChange={e => setInlineTx({...inlineTx, accountId: e.target.value})} className="bg-gray-900 border border-gray-700 rounded p-1.5 text-xs text-white w-full outline-none min-w-[110px]">
+                                        {accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name}</option>)}
+                                      </select>
+                                    ) : (
+                                      <div className="bg-gray-800/70 border border-gray-700 rounded p-1.5 text-xs text-red-300 font-medium w-full min-w-[110px]">
+                                        {accounts.find(a => a.id === currentAccountId)?.name}
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td className="px-3 py-3"><input type="text" placeholder="Nouveau libellé..." value={inlineTx.description} onChange={e => setInlineTx({...inlineTx, description: e.target.value})} className="bg-gray-900 border border-gray-700 rounded p-1.5 text-xs text-white w-full outline-none min-w-[130px]" /></td>
+                                  <td className="px-3 py-3">
+                                    <AutocompleteInput 
+                                      value={inlineTx.supplier} 
+                                      onChange={val => setInlineTx({...inlineTx, supplier: val})} 
+                                      options={suppliers.map(s => s.name)} 
+                                      placeholder="Fournisseur / Tiers..." 
+                                      className="bg-gray-900 border border-gray-700 rounded p-1.5 text-xs text-white w-full outline-none min-w-[130px]" 
+                                    />
+                                  </td>
+                                  <td className="px-3 py-3">
+                                    <AutocompleteInput 
+                                      value={inlineTx.category} 
+                                      onChange={val => setInlineTx({...inlineTx, category: val})} 
+                                      options={categories.map(c => c.name)} 
+                                      placeholder="Choisir catégorie..." 
+                                      className="bg-gray-900 border border-gray-700 rounded p-1.5 text-xs text-white w-full outline-none min-w-[130px]" 
+                                    />
+                                  </td>
+                                  <td className="px-3 py-3">
+                                    <div className="flex flex-col space-y-1 min-w-[100px]">
+                                      <select value={inlineTx.paymentMethod} onChange={e => setInlineTx({...inlineTx, paymentMethod: e.target.value})} className="bg-gray-900 border border-gray-700 rounded p-1.5 text-xs text-white w-full outline-none">
+                                        <option value="CB">CB</option>
+                                        <option value="Chèque">Chèque</option>
+                                        <option value="Prélèvement">Prélèvement</option>
+                                        <option value="Virement">Virement</option>
+                                        <option value="Espèces">Espèces</option>
+                                      </select>
+                                      {inlineTx.paymentMethod === 'Chèque' && (
+                                        <input type="text" placeholder="N° chèque" value={inlineTx.checkNumber} onChange={e => setInlineTx({...inlineTx, checkNumber: e.target.value})} className="bg-gray-900 border border-gray-700 rounded p-1.5 text-xs text-white w-full outline-none" />
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="px-3 py-3 text-right min-w-[160px]">
+                                    <div className="flex items-center justify-end space-x-2">
+                                      <select value={inlineTx.type} onChange={e => setInlineTx({...inlineTx, type: e.target.value})} className={`bg-gray-900 border border-gray-700 rounded p-1.5 text-xs outline-none font-bold ${inlineTx.type === 'income' ? 'text-emerald-500' : 'text-red-400'}`}>
+                                        <option value="expense">Dépense</option>
+                                        <option value="income">Recette</option>
+                                      </select>
+                                      <input type="number" step="0.01" placeholder="0.00" value={inlineTx.amount} onChange={e => setInlineTx({...inlineTx, amount: e.target.value})} className="bg-gray-900 border border-gray-700 rounded p-1.5 text-xs text-white w-20 outline-none text-right font-bold" />
+                                    </div>
+                                  </td>
+                                  <td className="px-3 py-3 text-center">-</td>
+                                  <td className="px-3 py-3 text-center">
+                                    <button onClick={handleInlineSubmit} disabled={!inlineTx.amount || !inlineTx.description || !inlineTx.category} className="bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white p-2 rounded-lg" title="Ajouter l'écriture">
+                                      <Plus className="w-4 h-4 mx-auto"/>
+                                    </button>
+                                  </td>
+                                </tr>
+                              )}
+                              {filteredTransactions.length === 0 ? (
+                                <tr>
+                                  <td colSpan="9" className="px-4 py-8 text-center text-gray-500">Aucune écriture pour ce compte sur l'année {currentYear}.</td>
+                                </tr>
+                              ) : (
+                                filteredTransactions.map((tx) => (
+                                  <tr key={tx.id} className="bg-gray-900 border-b border-gray-800 hover:bg-gray-800/50">
+                                    <td className="px-3 py-3 whitespace-nowrap">{new Date(tx.date).toLocaleDateString('fr-FR')}</td>
+                                    <td className="px-3 py-3 whitespace-nowrap">{accounts.find(a => a.id === tx.accountId)?.name || '-'}</td>
+                                    <td className="px-3 py-3 font-medium text-gray-200">{tx.description}</td>
+                                    <td className="px-3 py-3 whitespace-nowrap">
+                                      {tx.supplier ? (
+                                        <span className="bg-blue-500/10 text-blue-300 text-xs px-2.5 py-1 rounded-full border border-blue-500/20">{tx.supplier}</span>
+                                      ) : (
+                                        <span className="text-gray-600 text-xs">-</span>
+                                      )}
+                                    </td>
+                                    <td className="px-3 py-3 whitespace-nowrap"><span className="bg-gray-800 text-gray-300 text-xs px-2.5 py-1 rounded-full border border-gray-700">{tx.category}</span></td>
+                                    <td className="px-3 py-3 text-sm text-gray-300 whitespace-nowrap">
+                                      <span className="block font-medium">{tx.paymentMethod || '-'}</span>
+                                      {tx.paymentMethod === 'Chèque' && tx.checkNumber && <span className="block text-xs text-gray-500">N° {tx.checkNumber}</span>}
+                                    </td>
+                                    <td className={`px-3 py-3 text-right font-bold whitespace-nowrap ${tx.type === 'income' ? 'text-emerald-500' : 'text-red-400'}`}>
+                                      {tx.type === 'income' ? '+' : '-'}{formatCurrency(tx.amount)}
+                                    </td>
+                                    <td className="px-3 py-3 text-center">
+                                      {isCurrentYearClosed ? (
+                                        <div className="flex justify-center">{tx.reconciled ? <CheckCircle className="w-6 h-6 text-gray-500" /> : <Circle className="w-6 h-6 text-gray-600" />}</div>
+                                      ) : (
+                                        <button onClick={() => toggleReconciled(tx.id)} className={`print:hidden ${tx.reconciled ? 'text-emerald-500' : 'text-gray-600'}`}>
+                                          {tx.reconciled ? <CheckCircle className="w-6 h-6 mx-auto" /> : <Circle className="w-6 h-6 mx-auto" />}
+                                        </button>
+                                      )}
+                                    </td>
+                                    <td className="px-3 py-3 text-center print:hidden">
+                                      {!isCurrentYearClosed && (
+                                        <div className="flex justify-center space-x-2">
+                                          <button onClick={() => setEditModalTx(tx)} className="text-gray-400 hover:text-white"><Pencil className="w-4 h-4"/></button>
+                                          <button onClick={() => deleteTransaction(tx.id)} className="text-gray-400 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>
+                                        </div>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ONGLET 3 : BILAN ANNUEL (PAR CATÉGORIE OU PAR FOURNISSEUR / TIERS) */}
+                  {activeTab === 'balance' && (
+                    <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-6">
+                      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+                        <div>
+                          <h2 className="text-xl font-bold text-white">Bilan Financier {currentYear} ({currentAccountName})</h2>
+                          <p className="text-xs text-gray-400 mt-1">
+                            Regroupement actuel : <strong className="text-gray-200">{balanceGroupBy === 'category' ? 'Par Catégorie' : 'Par Fournisseur / Tiers'}</strong>
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2 print:hidden">
+                          <div className="bg-gray-950 p-1 rounded-xl border border-gray-800 flex">
+                            <button 
+                              onClick={() => { setBalanceGroupBy('category'); setBalanceItemFilter('all'); }} 
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center space-x-1.5 ${balanceGroupBy === 'category' ? 'bg-red-600 text-white shadow' : 'text-gray-400 hover:text-white'}`}
+                            >
+                              <List className="w-3.5 h-3.5" />
+                              <span>Par Catégorie</span>
+                            </button>
+                            <button 
+                              onClick={() => { setBalanceGroupBy('supplier'); setBalanceItemFilter('all'); }} 
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center space-x-1.5 ${balanceGroupBy === 'supplier' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-white'}`}
+                            >
+                              <Users className="w-3.5 h-3.5" />
+                              <span>Par Fournisseur / Tiers</span>
+                            </button>
+                          </div>
+
+                          <div className="bg-gray-950 p-1 rounded-xl border border-gray-800 flex">
+                            <button onClick={() => setBalanceViewMode('global')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${balanceViewMode === 'global' ? 'bg-gray-800 text-white' : 'text-gray-400'}`}>Vue Synthèse</button>
+                            <button onClick={() => setBalanceViewMode('detailed')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${balanceViewMode === 'detailed' ? 'bg-gray-800 text-white' : 'text-gray-400'}`}>Vue Détaillée</button>
+                          </div>
+
+                          <select 
+                            value={balanceItemFilter} 
+                            onChange={(e) => setBalanceItemFilter(e.target.value)}
+                            className="bg-gray-800 border border-gray-700 text-white text-xs rounded-xl px-3 py-1.5 outline-none"
+                          >
+                            <option value="all">{balanceGroupBy === 'category' ? 'Toutes les catégories' : 'Tous les fournisseurs / tiers'}</option>
+                            {Object.keys(activeSummary).sort().map(key => (
+                              <option key={key} value={key}>{key}</option>
+                            ))}
+                          </select>
+
+                          <button onClick={exportCSV} className="flex items-center space-x-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-xl text-xs font-medium">
+                            <Download className="w-4 h-4"/><span>Export CSV / Sheets</span>
+                          </button>
+                          <button onClick={() => window.print()} className="flex items-center space-x-1.5 bg-gray-800 hover:bg-gray-700 text-white px-3 py-1.5 rounded-xl text-xs font-medium">
+                            <Printer className="w-4 h-4"/><span>Imprimer</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 flex justify-between items-center">
+                        <span className="text-gray-300 font-medium">Report à nouveau (Solde au 1er Janvier {currentYear})</span>
+                        <span className={`text-lg font-bold ${reportANouveau >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{formatCurrency(reportANouveau)}</span>
+                      </div>
+
+                      {balanceViewMode === 'global' ? (
+                        <table className="w-full text-sm text-left text-gray-300">
+                          <thead className="bg-gray-950 border-b border-gray-800">
+                            <tr>
+                              <th className="px-6 py-4">{balanceGroupBy === 'category' ? 'Catégorie' : 'Fournisseur / Tiers'}</th>
+                              <th className="px-6 py-4 text-right">Recettes</th>
+                              <th className="px-6 py-4 text-right">Dépenses</th>
+                              <th className="px-6 py-4 text-right">Solde</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredSummaryEntries.length === 0 ? (
+                              <tr>
+                                <td colSpan="4" className="px-6 py-8 text-center text-gray-500">Aucune opération sur cette sélection.</td>
+                              </tr>
+                            ) : (
+                              filteredSummaryEntries.map(([itemKey, data]) => (
+                                <tr key={itemKey} className="border-b border-gray-800 hover:bg-gray-800/30">
+                                  <td className="px-6 py-4 font-medium text-white">{itemKey}</td>
+                                  <td className="px-6 py-4 text-right text-emerald-500">{data.income > 0 ? formatCurrency(data.income) : '-'}</td>
+                                  <td className="px-6 py-4 text-right text-red-500">{data.expense > 0 ? formatCurrency(data.expense) : '-'}</td>
+                                  <td className={`px-6 py-4 text-right font-bold ${data.total >= 0 ? 'text-white' : 'text-red-400'}`}>{formatCurrency(data.total)}</td>
+                                </tr>
+                              ))
+                            )}
+                            <tr className="bg-gray-950 font-bold text-white border-t-2 border-gray-700">
+                              <td className="px-6 py-4">TOTAL DES MOUVEMENTS {currentYear}</td>
+                              <td className="px-6 py-4 text-right text-emerald-400">{formatCurrency(sumIncome)}</td>
+                              <td className="px-6 py-4 text-right text-red-400">{formatCurrency(sumExpense)}</td>
+                              <td className="px-6 py-4 text-right">{formatCurrency(sumTotal)}</td>
+                            </tr>
+                            {balanceItemFilter === 'all' && (
+                              <tr className="bg-red-950/20 font-extrabold text-white border-t border-red-500/30">
+                                <td className="px-6 py-4" colSpan="3">SOLDE FINAL (Avec Report à nouveau)</td>
+                                <td className="px-6 py-4 text-right text-lg">{formatCurrency(reportANouveau + sumTotal)}</td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <div className="space-y-4">
+                          {filteredSummaryEntries.map(([itemKey, data]) => {
+                            const itemTxs = filteredTransactions.filter(t => 
+                              balanceGroupBy === 'category' 
+                                ? (t.category || 'Non catégorisé') === itemKey
+                                : ((t.supplier || '').trim() || 'Non renseigné') === itemKey
+                            );
+                            if (itemTxs.length === 0) return null;
+                            return (
+                              <div key={itemKey} className="border border-gray-800 rounded-xl overflow-hidden">
+                                <div className="bg-gray-950 px-4 py-3 flex justify-between items-center border-b border-gray-800">
+                                  <span className="font-bold text-white">{itemKey}</span>
+                                  <span className={`font-bold ${data.total >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{formatCurrency(data.total)}</span>
+                                </div>
+                                <div className="divide-y divide-gray-800/60">
+                                  {itemTxs.map(tx => (
+                                    <div key={tx.id} className="px-4 py-2.5 flex justify-between items-center text-xs">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="text-gray-400">{new Date(tx.date).toLocaleDateString('fr-FR')}</span>
+                                        <span className="text-gray-200 font-medium">{tx.description}</span>
+                                        {balanceGroupBy === 'category' && tx.supplier && (
+                                          <span className="bg-blue-500/10 text-blue-300 px-2 py-0.5 rounded-full border border-blue-500/20">{tx.supplier}</span>
+                                        )}
+                                        {balanceGroupBy === 'supplier' && tx.category && (
+                                          <span className="bg-gray-800 text-gray-300 px-2 py-0.5 rounded-full border border-gray-700">{tx.category}</span>
+                                        )}
+                                      </div>
+                                      <span className={`font-bold ${tx.type === 'income' ? 'text-emerald-400' : 'text-red-400'}`}>
+                                        {tx.type === 'income' ? '+' : '-'}{formatCurrency(tx.amount)}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ONGLET 4 : AUTOMATISATIONS */}
+                  {activeTab === 'automations' && (
+                    <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
+                      <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-xl font-bold text-white">Opérations Récurrentes</h2>
+                        <button onClick={() => setIsAddAutomationOpen(true)} className="flex items-center space-x-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
+                          <Plus className="w-4 h-4"/><span>Ajouter</span>
+                        </button>
+                      </div>
+                      {automations.length === 0 ? (
+                        <p className="text-gray-500 text-sm">Aucune automatisation enregistrée.</p>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {automations.map(auto => (
+                            <div key={auto.id} className="bg-gray-950 border border-gray-800 p-4 rounded-xl flex justify-between items-center">
+                              <div>
+                                <p className="font-bold text-white">{auto.description}</p>
+                                <p className="text-xs text-gray-400">
+                                  {auto.supplier ? `${auto.supplier} • ` : ''}{auto.category} • {auto.frequency === 'monthly' ? 'Mensuel' : 'Annuel'}
+                                </p>
+                              </div>
+                              <div className="flex items-center space-x-3">
+                                <span className={`font-bold ${auto.type === 'income' ? 'text-emerald-400' : 'text-red-400'}`}>{formatCurrency(auto.amount)}</span>
+                                <button onClick={() => deleteAutomation(auto.id)} className="text-gray-500 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ONGLET 5 : PARAMÈTRES */}
+                  {activeTab === 'settings' && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      {/* COMPTES */}
+                      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
+                        <h2 className="text-lg font-bold text-white mb-4 flex items-center"><CreditCard className="w-5 h-5 mr-2 text-red-500"/> Comptes Bancaires</h2>
+                        <ul className="space-y-3 mb-6">
+                          {accounts.map(acc => (
+                            <li key={acc.id} className="flex justify-between items-center bg-gray-950 p-3 rounded-lg border border-gray-800">
+                              <span className="text-gray-200 font-medium">{acc.name}</span>
+                              <button onClick={() => deleteAccount(acc.id)} className="text-gray-500 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>
+                            </li>
+                          ))}
+                        </ul>
+                        <form onSubmit={addAccount} className="flex space-x-2">
+                          <input type="text" value={newAccountName} onChange={e => setNewAccountName(e.target.value)} placeholder="Nouveau compte..." className="flex-1 bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-sm text-white outline-none" />
+                          <button className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium">Ajouter</button>
+                        </form>
+                      </div>
+
+                      {/* CATÉGORIES */}
+                      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
+                        <h2 className="text-lg font-bold text-white mb-4 flex items-center"><List className="w-5 h-5 mr-2 text-red-500"/> Catégories</h2>
+                        <ul className="space-y-2.5 mb-6 max-h-64 overflow-y-auto pr-1">
+                          {categories.map(cat => (
+                            <li key={cat.id} className="flex justify-between items-center bg-gray-950 p-3 rounded-lg border border-gray-800">
+                              <span className="text-gray-200 text-sm">{cat.name}</span>
+                              <button onClick={() => deleteCategory(cat.id)} className="text-gray-500 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>
+                            </li>
+                          ))}
+                        </ul>
+                        <form onSubmit={addCategory} className="flex space-x-2">
+                          <input type="text" value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} placeholder="Nouvelle catégorie..." className="flex-1 bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-sm text-white outline-none" />
+                          <button className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium">Ajouter</button>
+                        </form>
+                      </div>
+
+                      {/* FOURNISSEURS / TIERS */}
+                      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
+                        <h2 className="text-lg font-bold text-white mb-4 flex items-center"><Users className="w-5 h-5 mr-2 text-blue-400"/> Fournisseurs / Tiers</h2>
+                        <ul className="space-y-2.5 mb-6 max-h-64 overflow-y-auto pr-1">
+                          {suppliers.map(sup => (
+                            <li key={sup.id} className="flex justify-between items-center bg-gray-950 p-3 rounded-lg border border-gray-800">
+                              <span className="text-gray-200 text-sm">{sup.name}</span>
+                              <button onClick={() => deleteSupplier(sup.id)} className="text-gray-500 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>
+                            </li>
+                          ))}
+                        </ul>
+                        <form onSubmit={addSupplier} className="flex space-x-2">
+                          <input type="text" value={newSupplierName} onChange={e => setNewSupplierName(e.target.value)} placeholder="Nouveau fournisseur..." className="flex-1 bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-sm text-white outline-none" />
+                          <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium">Ajouter</button>
+                        </form>
+                      </div>
+
+                      {/* CONNEXION CLOUD FIREBASE */}
+                      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 md:col-span-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                          <h2 className="text-lg font-bold text-white flex items-center">
+                            <Database className="w-5 h-5 mr-2 text-emerald-400"/> Synchronisation en ligne (Firebase)
+                          </h2>
+                          <span className={`text-xs px-3 py-1 rounded-full font-semibold ${
+                            cloudStatus === 'connected' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' :
+                            cloudStatus === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/30' :
+                            'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                          }`}>
+                            {cloudStatus === 'connected' ? '✓ Connecté en temps réel à Firebase' :
+                             cloudStatus === 'error' ? `⚠️ ${cloudErrorDetail || 'Vérifier les Règles Firebase'}` :
+                             'Connexion / Attente synchronisation...'}
+                          </span>
+                        </div>
+                        {cloudStatus === 'error' && (
+                          <div className="mb-4 p-3.5 bg-red-950/40 border border-red-500/30 rounded-xl text-xs text-gray-200 space-y-1.5">
+                            <p className="font-bold text-red-400">Pourquoi Firebase refuse la connexion ?</p>
+                            <p>Dans votre console Firebase &gt; <strong>Realtime Database</strong> &gt; onglet <strong>Règles</strong>, assurez-vous d'avoir publié ces règles puis cliquez sur <strong>Publier</strong> :</p>
+                            <pre className="bg-gray-950 p-2.5 rounded-lg text-emerald-400 font-mono text-[11px] overflow-x-auto select-all">{`{\n  "rules": {\n    "coffre_fort": {\n      "${EXPECTED_VAULT_KEY}": {\n        ".read": true,\n        ".write": true\n      }\n    }\n  }\n}`}</pre>
+                          </div>
+                        )}
+                        <div className="flex flex-col sm:flex-row gap-3">
+                          <input 
+                            type="url" 
+                            value={tempFbUrl} 
+                            onChange={(e) => setTempFbUrl(e.target.value)} 
+                            placeholder="https://tresorerie-amicale-sp-rieumes-default-rtdb.europe-west1.firebasedatabase.app" 
+                            className="flex-1 bg-gray-950 border border-gray-700 rounded-xl p-3 text-sm text-white outline-none focus:border-emerald-500"
+                          />
+                          <button 
+                            onClick={() => {
+                              localStorage.setItem('sp_rieumes_fb_url', tempFbUrl.trim());
+                              setFirebaseDbUrl(tempFbUrl.trim());
+                              setTimeout(() => forcePushToCloud(), 400);
+                            }}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-xl font-bold text-sm transition-colors"
+                          >
+                            Connecter / Synchroniser
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* CLÔTURE D'EXERCICE */}
+                      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 md:col-span-3">
+                        <h2 className="text-lg font-bold text-white mb-4 flex items-center"><Lock className="w-5 h-5 mr-2 text-red-500"/> Gestion des Exercices Annuels</h2>
+                        <div className="flex flex-wrap gap-3">
+                          {availableYears.map(year => {
+                            const closed = closedYears.includes(year);
+                            return (
+                              <button key={year} onClick={() => toggleYearClosure(year)} className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl border text-sm font-medium ${closed ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400' : 'bg-gray-950 border-gray-800 text-gray-300'}`}>
+                                {closed ? <Lock className="w-4 h-4"/> : <Unlock className="w-4 h-4"/>}
+                                <span>{year} ({closed ? 'Clôturé' : 'Ouvert'})</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* SAUVEGARDE JSON */}
+                      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 md:col-span-3">
+                        <h2 className="text-lg font-bold text-white mb-4 flex items-center"><Database className="w-5 h-5 mr-2 text-red-500"/> Sauvegarde sur Ordinateur (.json)</h2>
+                        <div className="flex flex-col sm:flex-row gap-4">
+                          <button onClick={exportBackup} className="flex-1 flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-medium">
+                            <Download className="w-5 h-5"/><span>Sauvegarder sur le PC (.json)</span>
+                          </button>
+                          <label className="flex-1 flex items-center justify-center space-x-2 bg-gray-800 hover:bg-gray-700 text-white py-3 rounded-xl cursor-pointer font-medium">
+                            <Upload className="w-5 h-5"/><span>Restaurer un fichier (.json)</span>
+                            <input type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </main>
+          </div>
+
+          {/* FENÊTRE DE SÉLECTION DU COMPTE */}
+          {isAccountPickerOpen && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex justify-center items-center z-50 p-4">
+              <div className="bg-gray-900 border border-gray-700 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl">
+                <div className="p-6 border-b border-gray-800 flex justify-between items-center">
+                  <div className="flex items-center space-x-3">
+                    <div className="bg-red-600 p-2.5 rounded-xl text-white">
+                      <CreditCard className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-white">Quel compte souhaitez-vous traiter ?</h3>
+                      <p className="text-xs text-gray-400">Sélectionnez le compte sur lequel saisir ou pointer vos écritures</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setIsAccountPickerOpen(false)} className="text-gray-400 hover:text-white p-1">
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+
+                <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[75vh] overflow-y-auto">
+                  {accounts.map(acc => {
+                    const bal = accountBalances[acc.id] || { pointed: 0, unpointed: 0, theoretical: 0 };
+                    const isSelected = currentAccountId === acc.id;
+                    return (
+                      <button
+                        key={acc.id}
+                        onClick={() => { setCurrentAccountId(acc.id); setHasSelectedAccountOnce(true); setIsAccountPickerOpen(false); }}
+                        className={`text-left p-5 rounded-2xl border transition-all flex flex-col justify-between group ${isSelected ? 'bg-red-600/15 border-red-500 shadow-lg shadow-red-600/10' : 'bg-gray-950 hover:bg-gray-800 border-gray-800 hover:border-gray-600'}`}
+                      >
+                        <div className="flex items-center justify-between mb-4">
+                          <span className="text-lg font-bold text-white group-hover:text-red-400 transition-colors">{acc.name}</span>
+                          <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${isSelected ? 'bg-red-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
+                            {isSelected ? 'Actif' : 'Choisir'}
+                          </span>
+                        </div>
+                        <div className="space-y-1.5 pt-3 border-t border-gray-800/80 w-full">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-gray-400">Solde Pointé :</span>
+                            <span className={`font-bold ${bal.pointed >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{formatCurrency(bal.pointed)}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-gray-400">Non pointé :</span>
+                            <span className="font-medium text-blue-400">{bal.unpointed > 0 ? '+' : ''}{formatCurrency(bal.unpointed)}</span>
+                          </div>
+                          <div className="flex justify-between text-sm pt-1 border-t border-gray-800/50">
+                            <span className="text-gray-300 font-semibold">Solde Théorique :</span>
+                            <span className={`font-extrabold ${bal.theoretical >= 0 ? 'text-white' : 'text-red-400'}`}>{formatCurrency(bal.theoretical)}</span>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+
+                  <button
+                    onClick={() => { setCurrentAccountId('all'); setHasSelectedAccountOnce(true); setIsAccountPickerOpen(false); }}
+                    className={`sm:col-span-2 text-left p-4 rounded-2xl border transition-all flex items-center justify-between ${currentAccountId === 'all' ? 'bg-red-600/15 border-red-500' : 'bg-gray-950 hover:bg-gray-800 border-gray-800'}`}
+                  >
+                    <div>
+                      <span className="font-bold text-white block">Voir tous les comptes (Cumul global)</span>
+                      <span className="text-xs text-gray-400">Affiche toutes les écritures confondues</span>
+                    </div>
+                    <span className="text-xs bg-gray-800 text-gray-300 px-3 py-1.5 rounded-xl border border-gray-700">Vue globale</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* FENÊTRE DE SÉLECTION DE L'ANNÉE */}
+          {isYearPickerOpen && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex justify-center items-center z-50 p-4">
+              <div className="bg-gray-900 border border-gray-700 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl">
+                <div className="p-6 border-b border-gray-800 flex justify-between items-center">
+                  <div className="flex items-center space-x-3">
+                    <div className="bg-blue-600 p-2.5 rounded-xl text-white">
+                      <Calendar className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-white">Choisir l'exercice comptable</h3>
+                      <p className="text-xs text-gray-400">Sélectionnez l'année à consulter ou modifier</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setIsYearPickerOpen(false)} className="text-gray-400 hover:text-white p-1">
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+
+                <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[65vh] overflow-y-auto">
+                  {availableYears.map(year => {
+                    const isSelected = currentYear === year;
+                    const isClosed = closedYears.includes(year);
+                    const countTx = transactions.filter(t => t.date.startsWith(year)).length;
+                    return (
+                      <button
+                        key={year}
+                        onClick={() => { setCurrentYear(year); setIsYearPickerOpen(false); }}
+                        className={`p-4 rounded-2xl border text-left transition-all flex flex-col justify-between ${
+                          isSelected 
+                            ? 'bg-blue-600/15 border-blue-500 shadow-lg shadow-blue-600/10' 
+                            : 'bg-gray-950 hover:bg-gray-800 border-gray-800 hover:border-gray-600'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-2xl font-extrabold text-white">{year}</span>
+                          {isClosed ? (
+                            <span className="flex items-center space-x-1 text-[11px] bg-yellow-500/10 text-yellow-400 border border-yellow-500/30 px-2 py-0.5 rounded-full">
+                              <Lock className="w-3 h-3" /><span>Clôturé</span>
+                            </span>
+                          ) : (
+                            <span className="text-[11px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                              Ouvert
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-400">{countTx} écriture(s) enregistrée(s)</p>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="p-4 bg-gray-950 border-t border-gray-800 flex justify-between items-center">
+                  <span className="text-xs text-gray-400">Besoin de préparer l'année suivante ?</span>
+                  <button
+                    onClick={() => {
+                      const maxYear = Math.max(...availableYears.map(Number));
+                      const nextYear = (maxYear + 1).toString();
+                      if (!manuallyOpenedYears.includes(nextYear)) {
+                        setManuallyOpenedYears(prev => [...prev, nextYear]);
+                      }
+                      setCurrentYear(nextYear);
+                      setIsYearPickerOpen(false);
+                    }}
+                    className="flex items-center space-x-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-white px-3 py-2 rounded-xl border border-gray-700 transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Ouvrir l'exercice {Math.max(...availableYears.map(Number)) + 1}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* MODALE : NOUVELLE OPÉRATION */}
+          {isAddModalOpen && (
+            <AddTransactionModal 
+              onClose={() => setIsAddModalOpen(false)} 
+              onSave={addTransaction} 
+              accounts={accounts} 
+              currentAccountId={currentAccountId} 
+              categories={categories} 
+              suppliers={suppliers}
+            />
+          )}
+
+          {/* MODALE : MODIFIER OPÉRATION */}
+          {editModalTx && (
+            <EditTransactionModal
+              tx={editModalTx}
+              onClose={() => setEditModalTx(null)}
+              onSave={handleEditTransaction}
+              accounts={accounts}
+              categories={categories}
+              suppliers={suppliers}
+            />
+          )}
+
+          {/* MODALE : NOUVELLE AUTOMATISATION */}
+          {isAddAutomationOpen && (
+            <AddAutomationModal 
+              onClose={() => setIsAddAutomationOpen(false)} 
+              onSave={addAutomation} 
+              accounts={accounts} 
+              categories={categories} 
+              suppliers={suppliers}
+            />
+          )}
+
+          {/* MODALE : CONFIRMATION RESTAURATION */}
+          {restoreData && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex justify-center items-center z-50 p-4">
+              <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-md w-full space-y-4">
+                <h3 className="text-xl font-bold text-white">Restaurer la sauvegarde ?</h3>
+                <p className="text-sm text-gray-300">Cette action remplacera les données actuelles par celles du fichier sélectionné.</p>
+                <div className="flex space-x-3 pt-2">
+                  <button onClick={() => setRestoreData(null)} className="flex-1 py-2.5 bg-gray-800 text-white rounded-xl">Annuler</button>
+                  <button onClick={confirmRestore} className="flex-1 py-2.5 bg-red-600 text-white rounded-xl font-bold">Confirmer</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function AddTransactionModal({ onClose, onSave, accounts, currentAccountId, categories, suppliers }) {
+      const [type, setType] = useState('expense');
+      const [amount, setAmount] = useState('');
+      const [description, setDescription] = useState('');
+      const [supplier, setSupplier] = useState('');
+      const [category, setCategory] = useState('');
+      const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+      const [accountId, setAccountId] = useState(currentAccountId === 'all' && accounts.length > 0 ? accounts[0].id : currentAccountId);
+      const [paymentMethod, setPaymentMethod] = useState('CB');
+      const [checkNumber, setCheckNumber] = useState('');
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!amount || !description || !category) return;
+        onSave({ type, amount: parseFloat(amount), description, supplier: supplier.trim(), category: category.trim(), date, accountId, paymentMethod, checkNumber: paymentMethod === 'Chèque' ? checkNumber.trim() : null, reconciled: false });
+      };
+
+      return (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex justify-center items-center z-50 p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md overflow-visible shadow-2xl">
+            <div className="flex justify-between items-center p-6 border-b border-gray-800">
+              <h3 className="text-xl font-bold text-white">Nouvelle Opération</h3>
+              <button onClick={onClose} className="text-gray-400 hover:text-white"><X className="w-6 h-6"/></button>
+            </div>
+            <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[82vh] overflow-y-auto">
+              <div className="grid grid-cols-2 gap-4">
+                <button type="button" onClick={() => setType('expense')} className={`p-3 rounded-xl border flex items-center justify-center space-x-2 ${type === 'expense' ? 'bg-red-500/10 border-red-500 text-red-500' : 'bg-gray-800 border-gray-700 text-gray-400'}`}><ArrowDownRight className="w-5 h-5"/><span className="font-medium">Dépense</span></button>
+                <button type="button" onClick={() => setType('income')} className={`p-3 rounded-xl border flex items-center justify-center space-x-2 ${type === 'income' ? 'bg-emerald-500/10 border-emerald-500 text-emerald-500' : 'bg-gray-800 border-gray-700 text-gray-400'}`}><ArrowUpRight className="w-5 h-5"/><span className="font-medium">Recette</span></button>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-sm text-gray-400 mb-1">Montant (€)</label><input type="number" step="0.01" required className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
+                <div><label className="block text-sm text-gray-400 mb-1">Date</label><input type="date" required className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" value={date} onChange={(e) => setDate(e.target.value)} /></div>
+              </div>
+              <div><label className="block text-sm text-gray-400 mb-1">Compte</label><select className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" value={accountId} onChange={(e) => setAccountId(e.target.value)}>{accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name}</option>)}</select></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-sm text-gray-400 mb-1">Mode</label><select className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}><option value="CB">CB</option><option value="Chèque">Chèque</option><option value="Prélèvement">Prélèvement</option><option value="Virement">Virement</option><option value="Espèces">Espèces</option></select></div>
+                {paymentMethod === 'Chèque' && <div><label className="block text-sm text-gray-400 mb-1">N° chèque</label><input type="text" required className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" value={checkNumber} onChange={(e) => setCheckNumber(e.target.value)} /></div>}
+              </div>
+              <div><label className="block text-sm text-gray-400 mb-1">Libellé</label><input type="text" required className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" value={description} onChange={(e) => setDescription(e.target.value)} /></div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Fournisseur / Tiers (optionnel)</label>
+                <AutocompleteInput direction="up" value={supplier} onChange={setSupplier} options={suppliers.map(s => s.name)} required={false} placeholder="Rechercher ou saisir un nouveau tiers..." className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Catégorie</label>
+                <AutocompleteInput direction="up" value={category} onChange={setCategory} options={categories.map(c => c.name)} required={true} placeholder="Choisir ou taper une catégorie..." className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" />
+              </div>
+              <div className="pt-4 flex space-x-3"><button type="button" onClick={onClose} className="flex-1 py-3 bg-gray-800 text-white rounded-xl">Annuler</button><button type="submit" className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold">Enregistrer</button></div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    function EditTransactionModal({ tx, onClose, onSave, accounts, categories, suppliers }) {
+      const [type, setType] = useState(tx.type);
+      const [amount, setAmount] = useState(tx.amount);
+      const [description, setDescription] = useState(tx.description);
+      const [supplier, setSupplier] = useState(tx.supplier || '');
+      const [category, setCategory] = useState(tx.category);
+      const [date, setDate] = useState(tx.date);
+      const [accountId, setAccountId] = useState(tx.accountId);
+      const [paymentMethod, setPaymentMethod] = useState(tx.paymentMethod || 'CB');
+      const [checkNumber, setCheckNumber] = useState(tx.checkNumber || '');
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        onSave({ ...tx, type, amount: parseFloat(amount), description, supplier: supplier.trim(), category: category.trim(), date, accountId, paymentMethod, checkNumber: paymentMethod === 'Chèque' ? checkNumber : null });
+      };
+
+      return (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex justify-center items-center z-50 p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md overflow-visible shadow-2xl">
+            <div className="flex justify-between items-center p-6 border-b border-gray-800">
+              <h3 className="text-xl font-bold text-white">Modifier l'Opération</h3>
+              <button onClick={onClose} className="text-gray-400 hover:text-white"><X className="w-6 h-6"/></button>
+            </div>
+            <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[82vh] overflow-y-auto">
+              <div className="grid grid-cols-2 gap-4">
+                <button type="button" onClick={() => setType('expense')} className={`p-3 rounded-xl border flex items-center justify-center space-x-2 ${type === 'expense' ? 'bg-red-500/10 border-red-500 text-red-500' : 'bg-gray-800 border-gray-700 text-gray-400'}`}><ArrowDownRight className="w-5 h-5"/><span className="font-medium">Dépense</span></button>
+                <button type="button" onClick={() => setType('income')} className={`p-3 rounded-xl border flex items-center justify-center space-x-2 ${type === 'income' ? 'bg-emerald-500/10 border-emerald-500 text-emerald-500' : 'bg-gray-800 border-gray-700 text-gray-400'}`}><ArrowUpRight className="w-5 h-5"/><span className="font-medium">Recette</span></button>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-sm text-gray-400 mb-1">Montant (€)</label><input type="number" step="0.01" required className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
+                <div><label className="block text-sm text-gray-400 mb-1">Date</label><input type="date" required className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" value={date} onChange={(e) => setDate(e.target.value)} /></div>
+              </div>
+              <div><label className="block text-sm text-gray-400 mb-1">Compte</label><select className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" value={accountId} onChange={(e) => setAccountId(e.target.value)}>{accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name}</option>)}</select></div>
+              <div><label className="block text-sm text-gray-400 mb-1">Libellé</label><input type="text" required className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" value={description} onChange={(e) => setDescription(e.target.value)} /></div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Fournisseur / Tiers</label>
+                <AutocompleteInput direction="up" value={supplier} onChange={setSupplier} options={suppliers.map(s => s.name)} required={false} placeholder="Rechercher ou saisir un tiers..." className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Catégorie</label>
+                <AutocompleteInput direction="up" value={category} onChange={setCategory} options={categories.map(c => c.name)} required={true} placeholder="Choisir catégorie..." className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" />
+              </div>
+              <div className="pt-4 flex space-x-3"><button type="button" onClick={onClose} className="flex-1 py-3 bg-gray-800 text-white rounded-xl">Annuler</button><button type="submit" className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold">Mettre à jour</button></div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    function AddAutomationModal({ onClose, onSave, accounts, categories, suppliers }) {
+      const [type, setType] = useState('expense');
+      const [amount, setAmount] = useState('');
+      const [description, setDescription] = useState('');
+      const [supplier, setSupplier] = useState('');
+      const [category, setCategory] = useState('');
+      const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
+      const [frequency, setFrequency] = useState('monthly');
+      const [paymentMethod, setPaymentMethod] = useState('Prélèvement');
+      const [accountId, setAccountId] = useState(accounts.length > 0 ? accounts[0].id : '');
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!amount || !description || !category) return;
+        onSave({ type, amount: parseFloat(amount), description, supplier: supplier.trim(), category: category.trim(), startDate, nextDate: startDate, frequency, paymentMethod, accountId });
+      };
+
+      return (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex justify-center items-center z-50 p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md overflow-visible shadow-2xl">
+            <div className="flex justify-between items-center p-6 border-b border-gray-800"><h3 className="text-xl font-bold text-white">Nouvelle Automatisation</h3><button onClick={onClose} className="text-gray-400 hover:text-white"><X className="w-6 h-6"/></button></div>
+            <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[82vh] overflow-y-auto">
+              <div className="grid grid-cols-2 gap-4">
+                <button type="button" onClick={() => setType('expense')} className={`p-3 rounded-xl border flex items-center justify-center space-x-2 ${type === 'expense' ? 'bg-red-500/10 border-red-500 text-red-500' : 'bg-gray-800 border-gray-700 text-gray-400'}`}><ArrowDownRight className="w-5 h-5"/><span className="font-medium">Dépense</span></button>
+                <button type="button" onClick={() => setType('income')} className={`p-3 rounded-xl border flex items-center justify-center space-x-2 ${type === 'income' ? 'bg-emerald-500/10 border-emerald-500 text-emerald-500' : 'bg-gray-800 border-gray-700 text-gray-400'}`}><ArrowUpRight className="w-5 h-5"/><span className="font-medium">Recette</span></button>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-sm text-gray-400 mb-1">Montant (€)</label><input type="number" step="0.01" required className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
+                <div><label className="block text-sm text-gray-400 mb-1">Date de début</label><input type="date" required className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-sm text-gray-400 mb-1">Fréquence</label><select className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" value={frequency} onChange={(e) => setFrequency(e.target.value)}><option value="monthly">Mensuelle</option><option value="yearly">Annuelle</option></select></div>
+                <div><label className="block text-sm text-gray-400 mb-1">Mode</label><select className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}><option value="Prélèvement">Prélèvement</option><option value="Virement">Virement</option></select></div>
+              </div>
+              <div><label className="block text-sm text-gray-400 mb-1">Compte</label><select className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" value={accountId} onChange={(e) => setAccountId(e.target.value)}>{accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name}</option>)}</select></div>
+              <div><label className="block text-sm text-gray-400 mb-1">Libellé</label><input type="text" required className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" value={description} onChange={(e) => setDescription(e.target.value)} /></div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Fournisseur / Tiers</label>
+                <AutocompleteInput direction="up" value={supplier} onChange={setSupplier} options={suppliers.map(s => s.name)} required={false} placeholder="Choisir un fournisseur..." className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Catégorie</label>
+                <AutocompleteInput direction="up" value={category} onChange={setCategory} options={categories.map(c => c.name)} required={true} placeholder="Choisir catégorie..." className="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white outline-none" />
+              </div>
+              <div className="pt-4 flex space-x-3"><button type="button" onClick={onClose} className="flex-1 py-3 bg-gray-800 text-white rounded-xl">Annuler</button><button type="submit" className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold">Enregistrer</button></div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
 </body>
 </html>
