@@ -32,22 +32,32 @@
             }
         }
     </script>
+    <style>
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+        }
+        input[type=number] {
+            -moz-appearance: textfield;
+        }
+    </style>
 </head>
 <body class="bg-gray-100 min-h-screen flex flex-col justify-between">
     <div id="root" class="flex-grow"></div>
 
     <footer class="bg-pompier-navy text-gray-400 text-xs py-4 text-center border-t border-gray-800">
-        <p>© 2026 - Conçu et développé par <strong>Laurent Basque</strong> • Amicale des Sapeurs-Pompiers de Rieumes</p>
+        <p>© 2026 — Conçu et développé par <strong>Laurent Basque</strong> · Amicale des Sapeurs-Pompiers de Rieumes</p>
     </footer>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useMemo } = React;
 
-        // ==========================================
-        // CODE MAÎTRE (Gravé dans le marbre)
-        // ==========================================
-        // Profil Administrateur suprême : permet de voir/supprimer les codes PIN et vider l'historique
+        // CODE ADMINISTRATEUR SUPRÊME
         const CODE_PURGE = "0801"; 
+
+        // URL de la passerelle Google Apps Script (à renseigner après déploiement)
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyo7ru7U_NlAOapdJk36qsS7XZqWCY20L43jDibIyCqJ-eFpIAC_cqU2InwG_55COdBFQ/exec";
 
         // Configuration Firebase
         const firebaseConfig = {
@@ -66,15 +76,13 @@
         const db = firebase.database();
 
         function App() {
-            // Mode et Rôles
             const [userRole, setUserRole] = useState(sessionStorage.getItem('foyer_role') || null);
-            const isAdmin = userRole === 'bureau' || userRole === 'master';
-            const isMaster = userRole === 'master';
+            const isAdmin = userRole === 'bureau' || userRole === 'admin';
+            const isSuperAdmin = userRole === 'admin';
 
             const [showAdminLogin, setShowAdminLogin] = useState(false);
             const [adminPin, setAdminPin] = useState('');
             
-            // Mémoire de l'utilisateur
             const [utilisateur, setUtilisateur] = useState(localStorage.getItem('foyer_utilisateur') || '');
 
             const [activeTab, setActiveTab] = useState('sorties');
@@ -82,9 +90,16 @@
             const [fournisseurs, setFournisseurs] = useState({});
             const [famillesList, setFamillesList] = useState([]);
             const [codesBureau, setCodesBureau] = useState({});
-            const [selectedCategory, setSelectedCategory] = useState('Toutes');
+            const [contactsAlerte, setContactsAlerte] = useState({});
+            const [historiqueRaw, setHistoriqueRaw] = useState({});
             
-            // Modales
+            const [selectedCategory, setSelectedCategory] = useState('Toutes');
+            const [searchQuery, setSearchQuery] = useState('');
+            const [sortByPopularity, setSortByPopularity] = useState(true);
+
+            const [inventoryMode, setInventoryMode] = useState(false);
+            const [inventoryCounts, setInventoryCounts] = useState({});
+            
             const [showProductModal, setShowProductModal] = useState(false);
             const [editingProduct, setEditingProduct] = useState(null);
             const [showOrderModal, setShowOrderModal] = useState(false);
@@ -94,15 +109,17 @@
             const [showManageFamillesModal, setShowManageFamillesModal] = useState(false);
             const [newFamilleInput, setNewFamilleInput] = useState('');
 
-            // Synchronisation Firebase
             useEffect(() => {
                 const stockRef = db.ref('stock');
                 const fourRef = db.ref('fournisseurs');
                 const famRef = db.ref('familles');
                 const codesRef = db.ref('parametres/codesBureau');
+                const contactsRef = db.ref('parametres/contactsAlerte');
+                const histRef = db.ref('historique').limitToLast(200);
 
                 stockRef.on('value', (snapshot) => { setStock(snapshot.val() || {}); });
                 fourRef.on('value', (snapshot) => { setFournisseurs(snapshot.val() || {}); });
+                histRef.on('value', (snapshot) => { setHistoriqueRaw(snapshot.val() || {}); });
                 
                 famRef.on('value', (snapshot) => {
                     const data = snapshot.val();
@@ -114,15 +131,17 @@
                     }
                 });
 
-                // Chargement des codes PIN dynamiques
                 codesRef.on('value', (snapshot) => {
                     const data = snapshot.val();
                     if (data) {
                         setCodesBureau(data);
                     } else {
-                        // Création du premier code par défaut
                         codesRef.push({ nom: "Bureau (Défaut)", pin: "1818" });
                     }
+                });
+
+                contactsRef.on('value', (snapshot) => {
+                    setContactsAlerte(snapshot.val() || {});
                 });
 
                 return () => {
@@ -130,32 +149,85 @@
                     fourRef.off();
                     famRef.off();
                     codesRef.off();
+                    contactsRef.off();
+                    histRef.off();
                 };
             }, []);
+
+            const popularityMap = useMemo(() => {
+                const counts = {};
+                Object.values(historiqueRaw).forEach(log => {
+                    if (log.type === 'sortie' && Array.isArray(log.articles)) {
+                        log.articles.forEach(art => {
+                            if (art.id) {
+                                counts[art.id] = (counts[art.id] || 0) + (Number(art.quantite) || 1);
+                            }
+                        });
+                    }
+                });
+                return counts;
+            }, [historiqueRaw]);
 
             const stockArray = Object.entries(stock).map(([id, data]) => ({
                 id,
                 famille: data.famille || (famillesList[0] ? famillesList[0].nom : 'Boissons'),
+                popularite: popularityMap[id] || 0,
                 ...data
             }));
 
             const availableCategories = ['Toutes', ...famillesList.map(f => f.nom)];
-            const filteredStock = selectedCategory === 'Toutes' ? stockArray : stockArray.filter(item => item.famille === selectedCategory);
+
+            const filteredStock = useMemo(() => {
+                return stockArray
+                    .filter(item => {
+                        const matchCat = selectedCategory === 'Toutes' || item.famille === selectedCategory;
+                        const matchSearch = !searchQuery.trim() || 
+                            item.nom.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                            (item.format && item.format.toLowerCase().includes(searchQuery.toLowerCase()));
+                        return matchCat && matchSearch;
+                    })
+                    .sort((a, b) => {
+                        if (sortByPopularity && b.popularite !== a.popularite) {
+                            return b.popularite - a.popularite;
+                        }
+                        return a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' });
+                    });
+            }, [stockArray, selectedCategory, searchQuery, sortByPopularity]);
+
             const itemsInAlert = stockArray.filter(item => item.quantite <= item.seuil);
 
-            // GESTION CONNEXION BUREAU & MAÎTRE
+            // Envoi automatique des e-mails d'alerte via Google Apps Script
+            const triggerEmailAlerts = (declencheurNom, articlesEnAlerte) => {
+                const activeContacts = Object.values(contactsAlerte).filter(c => c.actif && c.email);
+                if (activeContacts.length === 0 || articlesEnAlerte.length === 0) return;
+
+                const emails = activeContacts.map(c => c.email);
+                const recapList = articlesEnAlerte.map(i => `• ${i.nom} (${i.format}) — Stock actuel : ${i.quantite} (Seuil : ${i.seuil})`).join('\n');
+                
+                const payload = {
+                    destinataires: emails,
+                    sujet: "🚨 Alerte Stock — Réserve Foyer Amicale SP Rieumes",
+                    message: `Suite à la sortie effectuée par ${declencheurNom}, un ou plusieurs articles ont atteint ou franchi le seuil d'alerte.\n\nArticles actuellement en rupture / alerte :\n${recapList}\n\nMerci de procéder au réapprovisionnement.\n\nLe Bureau de l'Amicale`
+                };
+
+                fetch(GOOGLE_SCRIPT_URL, {
+                    method: "POST",
+                    mode: "no-cors",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                }).catch(err => console.error("Erreur d'envoi mail :", err));
+            };
+
             const handleAdminLogin = (e) => {
                 e.preventDefault();
                 const validPins = Object.values(codesBureau).map(c => c.pin);
                 
                 if (adminPin === CODE_PURGE) {
-                    // Connexion Profil Maître (Accès Total)
-                    setUserRole('master');
-                    sessionStorage.setItem('foyer_role', 'master');
+                    setUserRole('admin');
+                    sessionStorage.setItem('foyer_role', 'admin');
                     setShowAdminLogin(false);
                     setAdminPin('');
                 } else if (validPins.includes(adminPin)) {
-                    // Connexion Profil Bureau Standard
                     setUserRole('bureau');
                     sessionStorage.setItem('foyer_role', 'bureau');
                     setShowAdminLogin(false);
@@ -169,10 +241,54 @@
             const handleAdminLogout = () => {
                 setUserRole(null);
                 sessionStorage.removeItem('foyer_role');
+                setInventoryMode(false);
                 setActiveTab('sorties');
             };
 
-            // Fonctions du stock
+            const handleStartInventory = () => {
+                const initialCounts = {};
+                stockArray.forEach(item => { initialCounts[item.id] = item.quantite; });
+                setInventoryCounts(initialCounts);
+                setInventoryMode(true);
+            };
+
+            const handleInventoryChange = (id, val) => {
+                const parsed = val === '' ? '' : Math.max(0, parseInt(val, 10) || 0);
+                setInventoryCounts(prev => ({ ...prev, [id]: parsed }));
+            };
+
+            const handleSaveInventory = () => {
+                const nomValide = utilisateur.trim();
+                if (!nomValide) return alert("🚨 Merci d'indiquer ton nom ou surnom avant de valider.");
+
+                const modifications = [];
+                stockArray.forEach(item => {
+                    const newQty = inventoryCounts[item.id] === '' ? 0 : Number(inventoryCounts[item.id]);
+                    if (!isNaN(newQty) && newQty !== item.quantite) {
+                        const diff = newQty - item.quantite;
+                        db.ref(`stock/${item.id}`).update({ quantite: newQty });
+                        modifications.push({ id: item.id, nom: item.nom, format: item.format, ancien: item.quantite, nouveau: newQty, quantite: diff });
+                    }
+                });
+
+                if (modifications.length === 0) {
+                    alert("Aucun écart de stock détecté.");
+                    setInventoryMode(false);
+                    return;
+                }
+
+                localStorage.setItem('foyer_utilisateur', nomValide);
+                db.ref('historique').push({
+                    date: firebase.database.ServerValue.TIMESTAMP,
+                    type: 'inventaire',
+                    utilisateur: nomValide,
+                    articles: modifications
+                });
+
+                setInventoryMode(false);
+                alert(`✅ Inventaire validé ! ${modifications.length} article(s) recalé(s).`);
+            };
+
             const handleOpenAddModal = () => {
                 const defaultFam = famillesList.length > 0 ? famillesList[0].nom : 'Boissons';
                 setEditingProduct({ id: null, nom: '', famille: defaultFam, format: 'Canette 33cl', seuil: 5, quantite: 0, fournisseurId: '' });
@@ -251,7 +367,7 @@
             };
 
             const handleDeleteFamille = (id, nom) => {
-                if (stockArray.some(item => item.famille === nom)) return alert(`Impossible : des articles sont encore rattachés à "${nom}".`);
+                if (stockArray.some(item => item.famille === nom)) return alert(`Impossible : des articles sont rattachés à "${nom}".`);
                 if (confirm(`Supprimer la famille "${nom}" ?`)) {
                     db.ref(`familles/${id}`).remove();
                     if (selectedCategory === nom) setSelectedCategory('Toutes');
@@ -281,7 +397,7 @@
                                 </div>
                                 <div>
                                     <h1 class="text-2xl font-bold uppercase tracking-wider">Amicale SP Rieumes</h1>
-                                    <p class="text-gray-300 text-sm">Gestion des stocks du Foyer</p>
+                                    <p class="text-gray-300 text-sm">Gestion des stocks de la Réserve</p>
                                 </div>
                             </div>
                             
@@ -313,10 +429,9 @@
                             </div>
                         </div>
 
-                        {/* MENU DÉROULANT DES ONGLETS */}
                         <div class="max-w-6xl mx-auto px-4 mt-2 flex space-x-1 sm:space-x-2 overflow-x-auto scrollbar-hide">
-                            <button onClick={() => setActiveTab('sorties')} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'sorties' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
-                                <i class="fa-solid fa-arrow-right-from-bracket"></i><span>Sorties</span>
+                            <button onClick={() => { setActiveTab('sorties'); setInventoryMode(false); }} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'sorties' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
+                                <i class="fa-solid fa-arrow-right-from-bracket"></i><span>Sorties Réserve</span>
                             </button>
                             
                             {isAdmin && (
@@ -324,89 +439,194 @@
                                     <button onClick={() => setActiveTab('stock')} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'stock' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
                                         <i class="fa-solid fa-boxes-stacked"></i><span>Stocks</span>
                                     </button>
-                                    <button onClick={() => setActiveTab('historique')} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'historique' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
+                                    <button onClick={() => { setActiveTab('historique'); setInventoryMode(false); }} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'historique' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
                                         <i class="fa-solid fa-clock-rotate-left"></i><span>Historique</span>
                                     </button>
-                                    <button onClick={() => setActiveTab('fournisseurs')} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'fournisseurs' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
+                                    <button onClick={() => { setActiveTab('fournisseurs'); setInventoryMode(false); }} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'fournisseurs' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
                                         <i class="fa-solid fa-address-book"></i><span class="hidden sm:inline">Fournisseurs</span>
                                     </button>
-                                    <button onClick={() => setActiveTab('securite')} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'securite' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
-                                        <i class="fa-solid fa-shield-halved"></i><span class="hidden sm:inline">Sécurité</span>
+                                    <button onClick={() => { setActiveTab('securite'); setInventoryMode(false); }} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'securite' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
+                                        <i class="fa-solid fa-shield-halved"></i><span class="hidden sm:inline">Sécurité & Alertes</span>
                                     </button>
                                 </>
                             )}
                         </div>
                     </header>
 
-                    <main class="max-w-6xl mx-auto px-4 py-8">
-                        {activeTab === 'sorties' && (
-                            <div>
-                                <div class="mb-4 flex items-center space-x-2 overflow-x-auto pb-2">
-                                    <span class="text-xs font-bold text-gray-500 uppercase mr-1">Famille :</span>
+                    <main class="max-w-6xl mx-auto px-4 py-6">
+                        {(activeTab === 'sorties' || (activeTab === 'stock' && isAdmin)) && (
+                            <div class="mb-6 space-y-3">
+                                <div class="flex flex-col sm:flex-row gap-3">
+                                    <div class="relative flex-1">
+                                        <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                                        <input 
+                                            type="text" 
+                                            placeholder="Rechercher un article (ex: Coca, Café, Eau...)" 
+                                            value={searchQuery}
+                                            onChange={e => setSearchQuery(e.target.value)}
+                                            class="w-full bg-white border border-gray-300 rounded-xl pl-10 pr-10 py-2.5 text-sm font-medium text-pompier-navy shadow-sm outline-none focus:border-pompier-navy focus:ring-2 focus:ring-blue-100"
+                                        />
+                                        {searchQuery && (
+                                            <button onClick={() => setSearchQuery('')} class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                                <i class="fa-solid fa-circle-xmark"></i>
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    <button 
+                                        onClick={() => setSortByPopularity(!sortByPopularity)}
+                                        class={`px-4 py-2.5 rounded-xl text-xs font-bold border flex items-center justify-center space-x-2 transition shrink-0 shadow-sm ${sortByPopularity ? 'bg-amber-50 border-amber-300 text-amber-800' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+                                    >
+                                        <i class={`fa-solid ${sortByPopularity ? 'fa-fire text-amber-500' : 'fa-arrow-down-a-z text-gray-500'}`}></i>
+                                        <span>{sortByPopularity ? 'Tri : Plus sortis en 1er' : 'Tri : Alphabétique (A-Z)'}</span>
+                                    </button>
+                                </div>
+
+                                <div class="flex items-center space-x-2 overflow-x-auto pb-1">
+                                    <span class="text-xs font-bold text-gray-500 uppercase mr-1 shrink-0">Famille :</span>
                                     {availableCategories.map(cat => (
-                                        <button key={cat} onClick={() => setSelectedCategory(cat)} class={`px-3 py-1.5 rounded-full text-xs font-bold transition-all shrink-0 ${selectedCategory === cat ? 'bg-pompier-red text-white shadow' : 'bg-white text-gray-700 border hover:bg-gray-50'}`}>
-                                            {cat}
+                                        <button 
+                                            key={cat} 
+                                            onClick={() => setSelectedCategory(cat)} 
+                                            class={`px-3 py-1.5 rounded-full text-xs font-bold transition-all shrink-0 ${selectedCategory === cat ? (activeTab === 'sorties' ? 'bg-pompier-red text-white shadow' : 'bg-pompier-navy text-white shadow') : 'bg-white text-gray-700 border hover:bg-gray-50'}`}
+                                        >
+                                            {cat} {activeTab === 'stock' && (cat === 'Toutes' ? `(${stockArray.length})` : `(${stockArray.filter(i => i.famille === cat).length})`)}
                                         </button>
                                     ))}
                                 </div>
-                                <SortiesTab stock={filteredStock} onUpdateQty={handleUpdateQty} db={db} utilisateur={utilisateur} setUtilisateur={setUtilisateur} />
                             </div>
+                        )}
+
+                        {activeTab === 'sorties' && (
+                            <SortiesTab 
+                                stock={filteredStock} 
+                                fullStock={stockArray}
+                                onUpdateQty={handleUpdateQty} 
+                                db={db} 
+                                utilisateur={utilisateur} 
+                                setUtilisateur={setUtilisateur}
+                                triggerEmailAlerts={triggerEmailAlerts}
+                            />
                         )}
 
                         {activeTab === 'stock' && isAdmin && (
                             <div>
                                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
                                     <div>
-                                        <h2 class="text-2xl font-bold text-pompier-navy">Inventaire du Foyer</h2>
+                                        <h2 class="text-2xl font-bold text-pompier-navy">Inventaire de la Réserve</h2>
+                                        <p class="text-xs text-gray-500">Gérez les fiches produits ou lancez un recalage rapide des quantités.</p>
                                     </div>
-                                    <div class="flex items-center space-x-2">
-                                        <button onClick={() => setShowManageFamillesModal(true)} class="bg-gray-200 hover:bg-gray-300 text-pompier-navy px-3 py-2.5 rounded-lg font-semibold text-sm flex items-center space-x-1.5 transition">
-                                            <i class="fa-solid fa-tags"></i><span>Familles</span>
-                                        </button>
-                                        <button onClick={handleOpenAddModal} class="bg-pompier-navy text-white px-4 py-2.5 rounded-lg shadow font-semibold hover:bg-blue-900 flex items-center space-x-2">
-                                            <i class="fa-solid fa-plus"></i><span>Produit</span>
-                                        </button>
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        {!inventoryMode ? (
+                                            <>
+                                                <button onClick={handleStartInventory} class="bg-amber-500 hover:bg-amber-600 text-white px-3.5 py-2.5 rounded-lg shadow font-bold text-sm flex items-center space-x-2 transition">
+                                                    <i class="fa-solid fa-clipboard-check"></i><span>Mode Inventaire</span>
+                                                </button>
+                                                <button onClick={() => setShowManageFamillesModal(true)} class="bg-gray-200 hover:bg-gray-300 text-pompier-navy px-3 py-2.5 rounded-lg font-semibold text-sm flex items-center space-x-1.5 transition">
+                                                    <i class="fa-solid fa-tags"></i><span>Familles</span>
+                                                </button>
+                                                <button onClick={handleOpenAddModal} class="bg-pompier-navy text-white px-4 py-2.5 rounded-lg shadow font-semibold hover:bg-blue-900 text-sm flex items-center space-x-2">
+                                                    <i class="fa-solid fa-plus"></i><span>Produit</span>
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <button onClick={() => setInventoryMode(false)} class="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded-lg font-bold text-sm">
+                                                Annuler l'inventaire
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
 
-                                <div class="mb-6 flex items-center space-x-2 overflow-x-auto pb-2">
-                                    {availableCategories.map(cat => (
-                                        <button key={cat} onClick={() => setSelectedCategory(cat)} class={`px-3 py-1.5 rounded-full text-xs font-bold transition-all shrink-0 ${selectedCategory === cat ? 'bg-pompier-navy text-white shadow' : 'bg-white text-gray-700 border hover:bg-gray-50'}`}>
-                                            {cat} {cat === 'Toutes' ? `(${stockArray.length})` : `(${stockArray.filter(i => i.famille === cat).length})`}
-                                        </button>
-                                    ))}
-                                </div>
+                                {inventoryMode && (
+                                    <div class="mb-6 bg-amber-50 border-2 border-amber-400 rounded-xl p-4 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                                        <div class="flex items-start space-x-3">
+                                            <i class="fa-solid fa-bolt text-amber-500 text-xl mt-1"></i>
+                                            <div>
+                                                <h3 class="font-bold text-amber-900">Mode Inventaire Flash activé</h3>
+                                                <p class="text-xs text-amber-800">Modifiez directement les quantités réelles constatées sur les étagères.</p>
+                                            </div>
+                                        </div>
+                                        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto">
+                                            <div class="flex items-center bg-white border border-amber-300 rounded-lg px-3 py-2">
+                                                <i class="fa-solid fa-user text-gray-400 mr-2 text-xs"></i>
+                                                <input 
+                                                    type="text" 
+                                                    placeholder="Ton nom / surnom..." 
+                                                    value={utilisateur} 
+                                                    onChange={e => setUtilisateur(e.target.value)} 
+                                                    class="bg-transparent outline-none text-sm font-semibold text-pompier-navy w-full sm:w-40"
+                                                />
+                                            </div>
+                                            <button onClick={handleSaveInventory} class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-bold text-sm shadow flex items-center justify-center space-x-2 shrink-0">
+                                                <i class="fa-solid fa-check-double"></i><span>Valider l'inventaire</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
 
                                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                     {filteredStock.map(item => {
                                         const isAlert = item.quantite <= item.seuil;
-                                        const statusBorder = isAlert ? 'border-red-500 bg-red-50/40' : 'border-gray-200 bg-white';
+                                        const invVal = inventoryCounts[item.id] !== undefined ? inventoryCounts[item.id] : item.quantite;
+                                        const hasChanged = inventoryMode && Number(invVal) !== item.quantite;
+                                        const statusBorder = hasChanged 
+                                            ? 'border-amber-500 bg-amber-50/40 ring-2 ring-amber-200' 
+                                            : (isAlert ? 'border-red-500 bg-red-50/40' : 'border-gray-200 bg-white');
                                         
                                         return (
-                                            <div key={item.id} class={`p-4 rounded-xl border-2 shadow-sm flex flex-col justify-between ${statusBorder}`}>
+                                            <div key={item.id} class={`p-4 rounded-xl border-2 shadow-sm flex flex-col justify-between transition ${statusBorder}`}>
                                                 <div class="flex justify-between items-start">
                                                     <div class="flex-1">
                                                         <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-pompier-navy uppercase tracking-wider">{item.famille}</span>
                                                         {isAlert && <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-600 text-white uppercase ml-1">Alerte</span>}
+                                                        {item.popularite > 0 && (
+                                                            <span class="text-[10px] font-semibold text-gray-400 ml-1.5" title="Total sorti récemment">
+                                                                <i class="fa-solid fa-fire-flame-curved text-amber-500 mr-0.5"></i>{item.popularite}
+                                                            </span>
+                                                        )}
                                                         <h3 class="font-bold text-lg text-gray-900 mt-1">{item.nom}</h3>
-                                                        <p class="text-xs text-gray-500">{item.format}</p>
+                                                        <p class="text-xs text-gray-500">{item.format} · Seuil : {item.seuil}</p>
                                                     </div>
-                                                    <div class="flex space-x-1">
-                                                        <button onClick={() => handleOpenEditModal(item)} class="p-1.5 text-gray-400 hover:text-blue-600"><i class="fa-solid fa-pen-to-square"></i></button>
-                                                        <button onClick={() => handleRemoveStock(item.id, item.nom)} class="p-1.5 text-gray-400 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
-                                                    </div>
+                                                    {!inventoryMode && (
+                                                        <div class="flex space-x-1">
+                                                            <button onClick={() => handleOpenEditModal(item)} class="p-1.5 text-gray-400 hover:text-blue-600"><i class="fa-solid fa-pen-to-square"></i></button>
+                                                            <button onClick={() => handleRemoveStock(item.id, item.nom)} class="p-1.5 text-gray-400 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
+                                                        </div>
+                                                    )}
                                                 </div>
 
                                                 <div class="mt-4 pt-3 border-t border-gray-200 flex items-center justify-between">
-                                                    <div>
-                                                        <button onClick={() => handleOpenRestock(item)} class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5 rounded font-bold shadow-sm flex items-center space-x-1.5">
-                                                            <i class="fa-solid fa-arrow-down-to-bracket text-[10px]"></i><span>+ Entrée</span>
-                                                        </button>
-                                                    </div>
-                                                    <div class="bg-gray-50 rounded-lg px-3 py-1.5 border border-gray-200 flex flex-col items-center justify-center min-w-[3rem]">
-                                                        <span class="text-[9px] text-gray-500 uppercase font-bold leading-none mb-1">En stock</span>
-                                                        <span class="font-bold text-xl text-pompier-navy leading-none">{item.quantite}</span>
-                                                    </div>
+                                                    {!inventoryMode ? (
+                                                        <>
+                                                            <div>
+                                                                <button onClick={() => handleOpenRestock(item)} class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5 rounded font-bold shadow-sm flex items-center space-x-1.5">
+                                                                    <i class="fa-solid fa-arrow-down-to-bracket text-[10px]"></i><span>+ Entrée</span>
+                                                                </button>
+                                                            </div>
+                                                            <div class="bg-gray-50 rounded-lg px-3 py-1.5 border border-gray-200 flex flex-col items-center justify-center min-w-[3.5rem]">
+                                                                <span class="text-[9px] text-gray-500 uppercase font-bold leading-none mb-1">En stock</span>
+                                                                <span class="font-bold text-xl text-pompier-navy leading-none">{item.quantite}</span>
+                                                            </div>
+                                                        </>
+                                                    ) : (
+                                                        <div class="w-full flex items-center justify-between">
+                                                            <div class="text-xs text-gray-500">
+                                                                Théorique : <strong class="text-gray-800">{item.quantite}</strong>
+                                                            </div>
+                                                            <div class="flex items-center space-x-1 bg-white border-2 border-amber-400 rounded-lg px-2 py-1">
+                                                                <button type="button" onClick={() => handleInventoryChange(item.id, Math.max(0, Number(invVal) - 1))} class="w-7 h-7 flex items-center justify-center text-gray-600 hover:bg-gray-100 rounded font-bold">-</button>
+                                                                <input 
+                                                                    type="number" 
+                                                                    min="0"
+                                                                    value={invVal}
+                                                                    onChange={e => handleInventoryChange(item.id, e.target.value)}
+                                                                    onFocus={e => e.target.select()}
+                                                                    class="w-14 text-center font-bold text-lg text-pompier-navy outline-none bg-transparent"
+                                                                />
+                                                                <button type="button" onClick={() => handleInventoryChange(item.id, Number(invVal) + 1)} class="w-7 h-7 flex items-center justify-center text-gray-600 hover:bg-gray-100 rounded font-bold">+</button>
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         );
@@ -416,7 +636,7 @@
                         )}
 
                         {activeTab === 'historique' && isAdmin && (
-                            <HistoriqueTab db={db} CODE_PURGE={CODE_PURGE} isMaster={isMaster} />
+                            <HistoriqueTab db={db} CODE_PURGE={CODE_PURGE} isSuperAdmin={isSuperAdmin} />
                         )}
 
                         {activeTab === 'fournisseurs' && isAdmin && (
@@ -452,11 +672,10 @@
                         )}
 
                         {activeTab === 'securite' && isAdmin && (
-                            <SecuriteTab db={db} codesBureau={codesBureau} CODE_PURGE={CODE_PURGE} isMaster={isMaster} />
+                            <SecuriteTab db={db} codesBureau={codesBureau} contactsAlerte={contactsAlerte} CODE_PURGE={CODE_PURGE} isSuperAdmin={isSuperAdmin} />
                         )}
                     </main>
 
-                    {/* MODALE CONNEXION BUREAU */}
                     {showAdminLogin && (
                         <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
                             <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden">
@@ -465,7 +684,7 @@
                                     <button onClick={() => {setShowAdminLogin(false); setAdminPin('');}} class="text-white hover:text-gray-200"><i class="fa-solid fa-times text-xl"></i></button>
                                 </div>
                                 <form onSubmit={handleAdminLogin} class="p-6 space-y-5">
-                                    <p class="text-sm text-gray-600 text-center">Saisis ton code PIN ou le code Maître pour accéder à la gestion complète.</p>
+                                    <p class="text-sm text-gray-600 text-center">Saisis ton code PIN ou le code Administrateur.</p>
                                     <div>
                                         <input 
                                             autoFocus
@@ -486,7 +705,6 @@
                         </div>
                     )}
 
-                    {/* MODALES PRODUITS & FAMILLES (isAdmin) */}
                     {showProductModal && editingProduct && isAdmin && (
                         <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
                             <div class="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
@@ -569,7 +787,6 @@
                         </div>
                     )}
 
-                    {/* MODALE ENTRÉE DE STOCK */}
                     {showRestockModal && restockItem && isAdmin && (
                         <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
                             <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden">
@@ -612,20 +829,42 @@
             );
         }
 
-        // ==========================================
-        // COMPOSANT ONGLET : GESTION DES SORTIES (PUBLIC)
-        // ==========================================
-        function SortiesTab({ stock, onUpdateQty, db, utilisateur, setUtilisateur }) {
+        function SortiesTab({ stock, fullStock, onUpdateQty, db, utilisateur, setUtilisateur, triggerEmailAlerts }) {
             const [cart, setCart] = useState({});
 
             const handleCartChange = (id, delta, maxStock) => {
                 setCart(prev => {
-                    const current = prev[id] || 0;
-                    const next = Math.max(0, current + delta);
-                    if (next > maxStock) return prev;
-                    if (next === 0) { const copy = { ...prev }; delete copy[id]; return copy; }
+                    const current = Number(prev[id]) || 0;
+                    const next = Math.max(0, Math.min(maxStock, current + delta));
+                    if (next === 0) {
+                        const copy = { ...prev };
+                        delete copy[id];
+                        return copy;
+                    }
                     return { ...prev, [id]: next };
                 });
+            };
+
+            const handleDirectCartInput = (id, rawValue, maxStock) => {
+                if (rawValue === '') {
+                    setCart(prev => {
+                        const copy = { ...prev };
+                        delete copy[id];
+                        return copy;
+                    });
+                    return;
+                }
+                const parsed = parseInt(rawValue, 10);
+                if (isNaN(parsed) || parsed <= 0) {
+                    setCart(prev => {
+                        const copy = { ...prev };
+                        delete copy[id];
+                        return copy;
+                    });
+                    return;
+                }
+                const clamped = Math.min(maxStock, parsed);
+                setCart(prev => ({ ...prev, [id]: clamped }));
             };
 
             const confirmValidation = () => {
@@ -634,14 +873,30 @@
 
                 localStorage.setItem('foyer_utilisateur', utilisateur.trim());
                 const articlesSortis = [];
+                const catalog = fullStock || stock;
+                let nouveauFranchissement = false;
+                const itemsEnAlerteActuels = [];
 
                 Object.entries(cart).forEach(([id, qtyToRemove]) => {
-                    const item = stock.find(i => i.id === id);
-                    if (item) {
-                        onUpdateQty(id, item.quantite, -qtyToRemove);
-                        articlesSortis.push({ id, nom: item.nom, quantite: qtyToRemove, format: item.format });
+                    const qty = Number(qtyToRemove) || 0;
+                    const item = catalog.find(i => i.id === id);
+                    if (item && qty > 0) {
+                        const ancienStock = item.quantite;
+                        const nouveauStock = ancienStock - qty;
+                        onUpdateQty(id, ancienStock, -qty);
+                        articlesSortis.push({ id, nom: item.nom, quantite: qty, format: item.format });
+
+                        // Vérifie si le produit vient de basculer en alerte (ou y est)
+                        if (nouveauStock <= item.seuil) {
+                            if (ancienStock > item.seuil) {
+                                nouveauFranchissement = true; // Vient de franchir le seuil
+                            }
+                            itemsEnAlerteActuels.push({ ...item, quantite: nouveauStock });
+                        }
                     }
                 });
+
+                if (articlesSortis.length === 0) return;
 
                 db.ref('historique').push({
                     date: firebase.database.ServerValue.TIMESTAMP,
@@ -650,42 +905,87 @@
                     articles: articlesSortis
                 });
 
+                // Si un article vient de passer sous son seuil, déclencher les alertes mail
+                if (nouveauFranchissement) {
+                    // Récupérer aussi tous les autres produits déjà en alerte pour le récap complet
+                    const autresEnAlerte = catalog.filter(i => i.quantite <= i.seuil && !cart[i.id]);
+                    const tousLesAlerte = [...itemsEnAlerteActuels, ...autresEnAlerte];
+                    triggerEmailAlerts(utilisateur.trim(), tousLesAlerte);
+                }
+
                 setCart({});
                 alert("Sorties enregistrées avec succès !");
             };
 
-            const totalItemsCount = Object.values(cart).reduce((a, b) => a + b, 0);
+            const totalItemsCount = Object.values(cart).reduce((a, b) => a + (Number(b) || 0), 0);
+            const catalogForCart = fullStock || stock;
 
             return (
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     <div class="lg:col-span-2 space-y-4">
                         <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                            <h2 class="text-xl font-bold text-pompier-navy mb-4"><i class="fa-solid fa-arrow-right-from-bracket mr-2"></i> Articles sortis du foyer</h2>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                {stock.map(item => {
-                                    const qtyInCart = cart[item.id] || 0;
-                                    const remainingStock = item.quantite - qtyInCart;
-                                    return (
-                                        <div key={item.id} class="bg-gray-50 border rounded-xl p-3 flex flex-col justify-between">
-                                            <div class="flex justify-between items-start mb-2">
-                                                <div>
-                                                    <h3 class="font-bold text-pompier-navy">{item.nom}</h3>
-                                                    <span class="text-xs text-gray-500">Stock dispo : <strong class={remainingStock <= item.seuil ? "text-red-600" : ""}>{remainingStock}</strong></span>
-                                                </div>
-                                                <span class="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded">{item.format}</span>
-                                            </div>
-                                            <div class="flex items-center justify-between mt-2 pt-2 border-t border-gray-200">
-                                                <span class="text-xs font-semibold text-gray-600">Quantité :</span>
-                                                <div class="flex items-center space-x-2 bg-white border rounded px-2 py-1 shadow-sm">
-                                                    <button onClick={() => handleCartChange(item.id, -1, item.quantite)} class="w-7 h-7 flex items-center justify-center text-gray-600 hover:text-pompier-red rounded"><i class="fa-solid fa-minus text-xs"></i></button>
-                                                    <span class="w-6 text-center font-bold text-pompier-navy">{qtyInCart}</span>
-                                                    <button onClick={() => handleCartChange(item.id, 1, item.quantite)} class={`w-7 h-7 flex items-center justify-center rounded text-white ${remainingStock > 0 ? 'bg-pompier-navy hover:bg-blue-900' : 'bg-gray-300 cursor-not-allowed'}`} disabled={remainingStock <= 0}><i class="fa-solid fa-plus text-xs"></i></button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
+                            <div class="flex justify-between items-center mb-4">
+                                <h2 class="text-xl font-bold text-pompier-navy">
+                                    <i class="fa-solid fa-arrow-right-from-bracket mr-2"></i> Sortir de la réserve
+                                </h2>
+                                <span class="text-xs text-gray-400 hidden sm:inline">Utilisez +/- ou cliquez sur le chiffre pour saisir</span>
                             </div>
+
+                            {stock.length === 0 ? (
+                                <p class="text-center text-gray-400 py-8 italic">Aucun article ne correspond à la recherche.</p>
+                            ) : (
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    {stock.map(item => {
+                                        const qtyInCart = cart[item.id] || 0;
+                                        const remainingStock = item.quantite - qtyInCart;
+                                        const isSelected = qtyInCart > 0;
+                                        return (
+                                            <div key={item.id} class={`border rounded-xl p-3 flex flex-col justify-between transition ${isSelected ? 'bg-red-50/40 border-pompier-red ring-1 ring-red-200' : 'bg-gray-50 border-gray-200'}`}>
+                                                <div class="flex justify-between items-start mb-2">
+                                                    <div>
+                                                        <h3 class="font-bold text-pompier-navy">{item.nom}</h3>
+                                                        <span class="text-xs text-gray-500">
+                                                            Dispo réserve : <strong class={remainingStock <= item.seuil ? "text-red-600" : "text-gray-800"}>{remainingStock}</strong>
+                                                        </span>
+                                                    </div>
+                                                    <span class="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded shrink-0">{item.format}</span>
+                                                </div>
+                                                <div class="flex items-center justify-between mt-2 pt-2 border-t border-gray-200">
+                                                    <span class="text-xs font-semibold text-gray-600">À sortir :</span>
+                                                    <div class="flex items-center space-x-1 bg-white border border-gray-300 rounded-lg px-1.5 py-1 shadow-sm focus-within:border-pompier-navy">
+                                                        <button 
+                                                            type="button"
+                                                            onClick={() => handleCartChange(item.id, -1, item.quantite)} 
+                                                            class="w-7 h-7 flex items-center justify-center text-gray-600 hover:text-pompier-red hover:bg-gray-100 rounded transition"
+                                                        >
+                                                            <i class="fa-solid fa-minus text-xs"></i>
+                                                        </button>
+                                                        <input 
+                                                            type="number"
+                                                            min="0"
+                                                            max={item.quantite}
+                                                            placeholder="0"
+                                                            value={qtyInCart === 0 ? '' : qtyInCart}
+                                                            onChange={e => handleDirectCartInput(item.id, e.target.value, item.quantite)}
+                                                            onFocus={e => e.target.select()}
+                                                            disabled={item.quantite <= 0}
+                                                            class="w-12 text-center font-bold text-pompier-navy outline-none bg-transparent text-sm"
+                                                        />
+                                                        <button 
+                                                            type="button"
+                                                            onClick={() => handleCartChange(item.id, 1, item.quantite)} 
+                                                            class={`w-7 h-7 flex items-center justify-center rounded text-white transition ${remainingStock > 0 ? 'bg-pompier-navy hover:bg-blue-900' : 'bg-gray-300 cursor-not-allowed'}`} 
+                                                            disabled={remainingStock <= 0}
+                                                        >
+                                                            <i class="fa-solid fa-plus text-xs"></i>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -697,7 +997,7 @@
                             </h3>
                             <div class="space-y-3 mb-4 max-h-60 overflow-y-auto pr-1">
                                 {Object.entries(cart).map(([id, qty]) => {
-                                    const item = stock.find(i => i.id === id);
+                                    const item = catalogForCart.find(i => i.id === id);
                                     if (!item) return null;
                                     return (
                                         <div key={id} class="flex justify-between items-center text-sm border-b pb-2">
@@ -707,7 +1007,7 @@
                                             </div>
                                             <div class="flex items-center space-x-2">
                                                 <span class="font-bold text-pompier-red">-{qty}</span>
-                                                <button onClick={() => handleCartChange(id, -qty, item.quantite)} class="text-gray-400 hover:text-red-600"><i class="fa-solid fa-trash text-xs"></i></button>
+                                                <button onClick={() => handleDirectCartInput(id, '', item.quantite)} class="text-gray-400 hover:text-red-600"><i class="fa-solid fa-trash text-xs"></i></button>
                                             </div>
                                         </div>
                                     );
@@ -730,10 +1030,7 @@
             );
         }
 
-        // ==========================================
-        // COMPOSANT ONGLET : HISTORIQUE
-        // ==========================================
-        function HistoriqueTab({ db, CODE_PURGE, isMaster }) {
+        function HistoriqueTab({ db, CODE_PURGE, isSuperAdmin }) {
             const [logs, setLogs] = useState([]);
             const [showPinPrompt, setShowPinPrompt] = useState(false);
             const [pinCode, setPinCode] = useState('');
@@ -762,18 +1059,22 @@
                         alert("Historique effacé avec succès !");
                     }
                 } else {
-                    alert("Code de purge incorrect. L'historique n'a pas été effacé.");
+                    alert("Code de purge incorrect.");
                     setPinCode('');
                 }
+            };
+
+            const getLogStyle = (type) => {
+                if (type === 'sortie') return { color: '#e3001b', badgeClass: 'bg-red-100 text-red-700', label: 'Sortie' };
+                if (type === 'inventaire') return { color: '#f59e0b', badgeClass: 'bg-amber-100 text-amber-800', label: 'Correction Inventaire' };
+                return { color: '#059669', badgeClass: 'bg-emerald-100 text-emerald-700', label: 'Entrée' };
             };
 
             return (
                 <div class="max-w-3xl mx-auto relative">
                     <div class="flex justify-between items-center mb-6">
                         <h2 class="text-2xl font-bold text-pompier-navy">Journal des mouvements</h2>
-                        
-                        {/* Le bouton Vider n'apparaît QUE pour le profil Maître */}
-                        {logs.length > 0 && isMaster && (
+                        {logs.length > 0 && isSuperAdmin && (
                             <button onClick={() => {setShowPinPrompt(true); setPinCode('');}} class="text-xs bg-red-100 text-red-600 hover:bg-red-200 px-3 py-1.5 rounded-lg font-bold transition flex items-center space-x-1 shadow-sm">
                                 <i class="fa-solid fa-trash-can"></i><span>Vider</span>
                             </button>
@@ -784,32 +1085,46 @@
                         <p class="text-center text-gray-500 py-8 bg-white rounded-xl shadow-sm">Aucun historique pour le moment.</p>
                     ) : (
                         <div class="space-y-4">
-                            {logs.map(log => (
-                                <div key={log.id} class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-gray-200" style={{ borderLeftColor: log.type === 'sortie' ? '#e3001b' : '#059669' }}>
-                                    <div class="flex justify-between items-start mb-3">
-                                        <div><span class="font-bold text-gray-800 text-lg"><i class="fa-solid fa-user-pen text-gray-400 mr-2 text-sm"></i>{log.utilisateur}</span></div>
-                                        <div class="text-right">
-                                            <div class="text-xs text-gray-500 font-semibold mb-1">{new Date(log.date).toLocaleString('fr-FR', {day: '2-digit', month: 'short', hour: '2-digit', minute:'2-digit'})}</div>
-                                            <span class={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${log.type === 'sortie' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                                                {log.type === 'sortie' ? 'Sortie' : 'Entrée'}
-                                            </span>
+                            {logs.map(log => {
+                                const style = getLogStyle(log.type);
+                                return (
+                                    <div key={log.id} class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-gray-200" style={{ borderLeftColor: style.color }}>
+                                        <div class="flex justify-between items-start mb-3">
+                                            <div><span class="font-bold text-gray-800 text-lg"><i class="fa-solid fa-user-pen text-gray-400 mr-2 text-sm"></i>{log.utilisateur}</span></div>
+                                            <div class="text-right">
+                                                <div class="text-xs text-gray-500 font-semibold mb-1">{new Date(log.date).toLocaleString('fr-FR', {day: '2-digit', month: 'short', hour: '2-digit', minute:'2-digit'})}</div>
+                                                <span class={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${style.badgeClass}`}>{style.label}</span>
+                                            </div>
                                         </div>
+                                        <ul class="text-sm space-y-1.5 bg-gray-50 p-3 rounded-lg border border-gray-100">
+                                            {log.articles && log.articles.map((art, idx) => {
+                                                if (log.type === 'inventaire') {
+                                                    const diff = Number(art.quantite) || 0;
+                                                    return (
+                                                        <li key={idx} class="flex justify-between items-center">
+                                                            <span>
+                                                                {art.nom} <span class="text-gray-400 text-xs ml-1">({art.format})</span>
+                                                                <span class="text-xs text-gray-500 ml-2">[{art.ancien} → <strong>{art.nouveau}</strong>]</span>
+                                                            </span>
+                                                            <span class={`font-bold ${diff > 0 ? 'text-emerald-600' : 'text-red-600'}`}>{diff > 0 ? `+${diff}` : diff}</span>
+                                                        </li>
+                                                    );
+                                                }
+                                                return (
+                                                    <li key={idx} class="flex justify-between items-center">
+                                                        <span>{art.nom} <span class="text-gray-400 text-xs ml-1">({art.format})</span></span>
+                                                        <span class={`font-bold ${log.type === 'sortie' ? 'text-red-600' : 'text-emerald-600'}`}>{log.type === 'sortie' ? '-' : '+'}{art.quantite}</span>
+                                                    </li>
+                                                );
+                                            })}
+                                        </ul>
                                     </div>
-                                    <ul class="text-sm space-y-1.5 bg-gray-50 p-3 rounded-lg border border-gray-100">
-                                        {log.articles && log.articles.map((art, idx) => (
-                                            <li key={idx} class="flex justify-between items-center">
-                                                <span>{art.nom} <span class="text-gray-400 text-xs ml-1">({art.format})</span></span>
-                                                <span class={`font-bold ${log.type === 'sortie' ? 'text-red-600' : 'text-emerald-600'}`}>{log.type === 'sortie' ? '-' : '+'}{art.quantite}</span>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                     
-                    {/* MODALE PIN PURGE */}
-                    {showPinPrompt && isMaster && (
+                    {showPinPrompt && isSuperAdmin && (
                         <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
                             <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden">
                                 <div class="bg-red-600 text-white px-5 py-4 flex justify-between items-center">
@@ -817,7 +1132,7 @@
                                     <button onClick={() => setShowPinPrompt(false)} class="text-white hover:text-red-200"><i class="fa-solid fa-times text-xl"></i></button>
                                 </div>
                                 <form onSubmit={handleVerifyPinAndClear} class="p-6 space-y-5">
-                                    <p class="text-sm text-gray-600 text-center">Saisis le code secret Maître (Purge) pour effacer définitivement ce journal.</p>
+                                    <p class="text-sm text-gray-600 text-center">Saisis le code secret Administrateur (Purge) pour effacer ce journal.</p>
                                     <div><input autoFocus required type="password" pattern="[0-9]*" inputMode="numeric" maxLength="4" placeholder="Code à 4 chiffres" value={pinCode} onChange={e => setPinCode(e.target.value)} class="w-full border-2 border-red-500 rounded-lg p-3 text-2xl font-bold text-center outline-none tracking-[0.5em] focus:ring-2 focus:ring-red-400" /></div>
                                     <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg shadow-md transition-colors">Valider et Effacer</button>
                                 </form>
@@ -828,60 +1143,112 @@
             )
         }
 
-        // ==========================================
-        // COMPOSANT ONGLET : GESTION DES CODES PIN BUREAU
-        // ==========================================
-        function SecuriteTab({ db, codesBureau, CODE_PURGE, isMaster }) {
+        function SecuriteTab({ db, codesBureau, contactsAlerte, CODE_PURGE, isSuperAdmin }) {
             const [newNom, setNewNom] = useState('');
             const [newPin, setNewPin] = useState('');
+            
+            const [newContactNom, setNewContactNom] = useState('');
+            const [newContactEmail, setNewContactEmail] = useState('');
 
             const handleAddCode = (e) => {
                 e.preventDefault();
                 const trimmedPin = newPin.trim();
                 if (trimmedPin.length !== 4) return alert("Le code PIN doit comporter exactement 4 chiffres.");
-                if (trimmedPin === CODE_PURGE) return alert("Ce code est réservé au Code Maître (Purge). Choisissez un autre code.");
+                if (trimmedPin === CODE_PURGE) return alert("Ce code est réservé à l'Administrateur.");
                 
                 const exists = Object.values(codesBureau).some(c => c.pin === trimmedPin);
-                if (exists) return alert("Ce code PIN existe déjà dans la liste.");
+                if (exists) return alert("Ce code PIN existe déjà.");
 
-                db.ref('parametres/codesBureau').push({
-                    nom: newNom.trim(),
-                    pin: trimmedPin
-                });
-                
-                alert(`Le code d'accès Bureau pour "${newNom}" a été créé avec succès.`);
+                db.ref('parametres/codesBureau').push({ nom: newNom.trim(), pin: trimmedPin });
+                alert(`Le code d'accès Bureau pour "${newNom}" a été créé.`);
                 setNewNom('');
                 setNewPin('');
             };
 
             const handleDeleteCode = (id, nom) => {
-                const totalCodes = Object.keys(codesBureau).length;
-                if (totalCodes <= 1) return alert("Vous ne pouvez pas supprimer le dernier code d'accès au Bureau !");
-                if (confirm(`Supprimer l'accès Bureau pour "${nom}" ?`)) {
-                    db.ref(`parametres/codesBureau/${id}`).remove();
-                }
+                if (Object.keys(codesBureau).length <= 1) return alert("Impossible de supprimer le dernier code.");
+                if (confirm(`Supprimer l'accès Bureau pour "${nom}" ?`)) db.ref(`parametres/codesBureau/${id}`).remove();
+            };
+
+            const handleAddContact = (e) => {
+                e.preventDefault();
+                if (!newContactNom.trim() || !newContactEmail.trim()) return;
+                db.ref('parametres/contactsAlerte').push({
+                    nom: newContactNom.trim(),
+                    email: newContactEmail.trim(),
+                    actif: true
+                });
+                setNewContactNom('');
+                setNewContactEmail('');
+            };
+
+            const handleToggleContact = (id, currentStatus) => {
+                db.ref(`parametres/contactsAlerte/${id}`).update({ actif: !currentStatus });
+            };
+
+            const handleDeleteContact = (id, nom) => {
+                if (confirm(`Supprimer le contact "${nom}" des alertes mail ?`)) db.ref(`parametres/contactsAlerte/${id}`).remove();
             };
 
             return (
-                <div class="max-w-4xl mx-auto">
+                <div class="max-w-4xl mx-auto space-y-8">
                     <div class="mb-6">
-                        <h2 class="text-2xl font-bold text-pompier-navy">Sécurité et Accès Bureau</h2>
+                        <h2 class="text-2xl font-bold text-pompier-navy">Sécurité & Gestion des Alertes</h2>
                         <p class="text-sm text-gray-500 mt-1">
-                            {isMaster ? "Tu es connecté avec le Code Maître. Tu peux gérer l'intégralité des accès au Bureau." : "Tu es connecté en mode Bureau standard. Tu peux créer ton propre code de connexion."}
+                            {isSuperAdmin ? "Connecté en Administrateur. Gestion complète des codes et des destinataires d'e-mails d'alerte." : "Connecté en Bureau standard."}
                         </p>
                     </div>
 
-                    <div class={`grid grid-cols-1 ${isMaster ? 'md:grid-cols-3' : 'max-w-md mx-auto'} gap-6`}>
-                        {/* Formulaire d'ajout - VISIBLE PAR TOUS LES MEMBRES DU BUREAU */}
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                        <h3 class="font-bold text-lg text-pompier-navy mb-4"><i class="fa-solid fa-envelope-circle-check mr-2"></i>Destinataires des e-mails d'alerte</h3>
+                        <p class="text-xs text-gray-500 mb-4">Ajoutez les personnes à prévenir en cas de rupture de stock. Vous pouvez activer ou désactiver l'envoi pour chaque personne (ex: en cas de congés).</p>
+                        
+                        {isSuperAdmin && (
+                            <form onSubmit={handleAddContact} class="flex flex-col sm:flex-row gap-2 mb-6">
+                                <input required type="text" placeholder="Nom ou prénom..." value={newContactNom} onChange={e => setNewContactNom(e.target.value)} class="border rounded-lg px-3 py-2 text-sm outline-none flex-1" />
+                                <input required type="email" placeholder="Adresse e-mail..." value={newContactEmail} onChange={e => setNewContactEmail(e.target.value)} class="border rounded-lg px-3 py-2 text-sm outline-none flex-1" />
+                                <button type="submit" class="bg-pompier-navy hover:bg-blue-900 text-white font-bold px-4 py-2 rounded-lg text-sm transition"><i class="fa-solid fa-plus mr-1"></i> Ajouter</button>
+                            </form>
+                        )}
+
+                        <div class="divide-y border rounded-lg overflow-hidden">
+                            {Object.entries(contactsAlerte).length === 0 ? (
+                                <p class="p-4 text-sm text-gray-400 text-center italic">Aucun contact d'alerte enregistré.</p>
+                            ) : (
+                                Object.entries(contactsAlerte).map(([id, contact]) => (
+                                    <div key={id} class="flex justify-between items-center p-4 hover:bg-gray-50">
+                                        <div>
+                                            <p class="font-bold text-gray-800">{contact.nom}</p>
+                                            <p class="text-xs text-gray-500">{contact.email}</p>
+                                        </div>
+                                        <div class="flex items-center space-x-3">
+                                            <button 
+                                                onClick={() => handleToggleContact(id, contact.actif)} 
+                                                class={`px-3 py-1 rounded-full text-xs font-bold transition ${contact.actif ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
+                                                title="Activer ou désactiver l'envoi pour ce contact"
+                                            >
+                                                {contact.actif ? '● Actif' : '○ En pause'}
+                                            </button>
+                                            {isSuperAdmin && (
+                                                <button onClick={() => handleDeleteContact(id, contact.nom)} class="text-gray-400 hover:text-red-500 p-1"><i class="fa-solid fa-trash"></i></button>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+
+                    <div class={`grid grid-cols-1 ${isSuperAdmin ? 'md:grid-cols-3' : 'max-w-md mx-auto'} gap-6`}>
                         <div class="md:col-span-1 bg-white p-5 rounded-xl shadow-sm border border-gray-200 self-start">
                             <h3 class="font-bold text-lg text-pompier-navy mb-4"><i class="fa-solid fa-key mr-2"></i>Nouveau code</h3>
                             <form onSubmit={handleAddCode} class="space-y-4">
                                 <div>
                                     <label class="block text-xs font-bold text-gray-600 mb-1">Nom / Fonction</label>
-                                    <input required type="text" placeholder="ex: Président, Trésorier, Cédric..." value={newNom} onChange={e => setNewNom(e.target.value)} class="w-full border rounded-lg p-2 text-sm outline-none focus:border-pompier-navy" />
+                                    <input required type="text" placeholder="ex: Président, Trésorier..." value={newNom} onChange={e => setNewNom(e.target.value)} class="w-full border rounded-lg p-2 text-sm outline-none focus:border-pompier-navy" />
                                 </div>
                                 <div>
-                                    <label class="block text-xs font-bold text-gray-600 mb-1">Nouveau Code PIN (4 chiffres)</label>
+                                    <label class="block text-xs font-bold text-gray-600 mb-1">Code PIN (4 chiffres)</label>
                                     <input required type="password" pattern="[0-9]*" inputMode="numeric" maxLength="4" placeholder="****" value={newPin} onChange={e => setNewPin(e.target.value)} class="w-full border rounded-lg p-2 text-center text-lg font-bold tracking-[0.2em] outline-none focus:border-pompier-navy" />
                                 </div>
                                 <button type="submit" class="w-full bg-pompier-navy hover:bg-blue-900 text-white font-bold py-2 rounded-lg transition-colors text-sm shadow-sm">
@@ -890,22 +1257,10 @@
                             </form>
                         </div>
 
-                        {/* Message d'information pour le bureau standard */}
-                        {!isMaster && (
-                            <div class="mt-2 p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-pompier-navy flex items-start space-x-3">
-                                <i class="fa-solid fa-circle-info mt-0.5 text-blue-500 text-lg"></i>
-                                <div>
-                                    <p class="font-bold mb-1">Affichage sécurisé</p>
-                                    <p>Pour des raisons de sécurité, la liste des codes existants et leur suppression sont réservées au détenteur du Code Maître.</p>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Liste des codes - VISIBLE UNIQUEMENT PAR LE MASTER */}
-                        {isMaster && (
+                        {isSuperAdmin && (
                             <div class="md:col-span-2 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                                 <div class="bg-gray-50 px-5 py-3 border-b border-gray-200">
-                                    <h3 class="font-bold text-gray-700">Codes actuellement autorisés</h3>
+                                    <h3 class="font-bold text-gray-700">Codes autorisés</h3>
                                 </div>
                                 <div class="divide-y divide-gray-100">
                                     {Object.entries(codesBureau).map(([id, data]) => (
@@ -919,20 +1274,18 @@
                                                     <p class="text-xs text-gray-500 font-mono">PIN: {data.pin}</p>
                                                 </div>
                                             </div>
-                                            <button onClick={() => handleDeleteCode(id, data.nom)} class="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors" title="Supprimer ce code">
+                                            <button onClick={() => handleDeleteCode(id, data.nom)} class="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors" title="Supprimer">
                                                 <i class="fa-solid fa-trash"></i>
                                             </button>
                                         </div>
                                     ))}
-
-                                    {/* Affiche le code maître fixe pour info (impossible à supprimer ici) */}
                                     <div class="flex justify-between items-center px-5 py-4 bg-gray-50 border-t-2 border-gray-200 opacity-60">
                                         <div class="flex items-center space-x-3">
                                             <div class="w-10 h-10 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center font-bold text-xl">
                                                 <i class="fa-solid fa-crown text-sm"></i>
                                             </div>
                                             <div>
-                                                <p class="font-bold text-gray-700">Code Maître & Purge</p>
+                                                <p class="font-bold text-gray-700">Code Administrateur & Purge</p>
                                                 <p class="text-xs text-gray-500 italic">Codé en dur dans l'application</p>
                                             </div>
                                         </div>
@@ -946,9 +1299,6 @@
             );
         }
 
-        // ==========================================
-        // COMPOSANT MODALE : PRÉPARATION COMMANDE
-        // ==========================================
         function OrderModal({ onClose, stock, fournisseurs }) {
             const [orderQties, setOrderQties] = useState({});
             const toOrder = stock.filter(item => item.quantite <= item.seuil);
@@ -978,21 +1328,20 @@
 
             const handleEmail = (fId, items) => {
                 const fData = fournisseurs[fId];
-                if (!fData || !fData.email) return alert("Adresse e-mail non renseignée pour ce fournisseur.");
+                if (!fData || !fData.email) return alert("Adresse e-mail non renseignée.");
                 const list = generateText(items);
                 if (!list) return alert("Aucune quantité sélectionnée.");
-                const body = `Bonjour,\n\nVoici notre commande pour l'Amicale des Sapeurs-Pompiers de Rieumes :\n\n${list}\n\nMerci de nous confirmer la préparation de cette commande.\n\nCordialement,\nLe Bureau de l'Amicale`;
+                const body = `Bonjour,\n\nVoici notre commande pour l'Amicale des Sapeurs-Pompiers de Rieumes :\n\n${list}\n\nMerci de nous confirmer.\n\nCordialement,\nLe Bureau de l'Amicale`;
                 window.location.href = `mailto:${fData.email}?subject=Commande Amicale SP Rieumes&body=${encodeURIComponent(body)}`;
             };
 
             const handleSMS = (fId, items) => {
                 const fData = fournisseurs[fId];
-                if (!fData || !fData.tel) return alert("Numéro de téléphone non renseigné pour ce fournisseur.");
+                if (!fData || !fData.tel) return alert("Numéro non renseigné.");
                 const list = generateText(items);
                 if (!list) return alert("Aucune quantité sélectionnée.");
-                const body = `Commande Amicale SP Rieumes :\n${list}\n\nMerci ! (Le Bureau)`;
-                const cleanPhone = fData.tel.replace(/\s+/g, '');
-                window.location.href = `sms:${cleanPhone}?body=${encodeURIComponent(body)}`;
+                const body = `Commande Amicale SP Rieumes :\n${list}\n\nMerci !`;
+                window.location.href = `sms:${fData.tel.replace(/\s+/g, '')}?body=${encodeURIComponent(body)}`;
             };
 
             return (
