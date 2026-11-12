@@ -56,7 +56,7 @@
         // CODE ADMINISTRATEUR SUPRÊME
         const CODE_PURGE = "0801"; 
 
-        // URL de la passerelle Google Apps Script (à renseigner après déploiement)
+        // URL de la passerelle Google Apps Script
         const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyo7ru7U_NlAOapdJk36qsS7XZqWCY20L43jDibIyCqJ-eFpIAC_cqU2InwG_55COdBFQ/exec";
 
         // Configuration Firebase
@@ -172,6 +172,7 @@
                 id,
                 famille: data.famille || (famillesList[0] ? famillesList[0].nom : 'Boissons'),
                 popularite: popularityMap[id] || 0,
+                alerteActive: data.alerteActive !== false, // Actif par défaut
                 ...data
             }));
 
@@ -194,26 +195,128 @@
                     });
             }, [stockArray, selectedCategory, searchQuery, sortByPopularity]);
 
-            const itemsInAlert = stockArray.filter(item => item.quantite <= item.seuil);
+            // Un article est en alerte uniquement si son alerte n'est pas en pause ET que sa quantité <= seuil
+            const itemsInAlert = stockArray.filter(item => item.alerteActive !== false && item.quantite <= item.seuil);
 
-            // Envoi automatique des e-mails d'alerte via Google Apps Script
-            const triggerEmailAlerts = (declencheurNom, articlesEnAlerte) => {
+            // Construction et envoi de l'e-mail HTML aux couleurs de l'Amicale
+            const triggerEmailAlerts = (declencheurNom, articlesEnAlerte, nouveauxIds = [], isTest = false) => {
                 const activeContacts = Object.values(contactsAlerte).filter(c => c.actif && c.email);
                 if (activeContacts.length === 0 || articlesEnAlerte.length === 0) return;
 
                 const emails = activeContacts.map(c => c.email);
-                const recapList = articlesEnAlerte.map(i => `• ${i.nom} (${i.format}) — Stock actuel : ${i.quantite} (Seuil : ${i.seuil})`).join('\n');
-                
+                const dateStr = new Date().toLocaleString('fr-FR', {
+                    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                });
+
+                const recapList = articlesEnAlerte.map(i => {
+                    const fourNom = (i.fournisseurId && fournisseurs[i.fournisseurId]) ? fournisseurs[i.fournisseurId].nom : 'Non attribué';
+                    return `• ${i.nom} (${i.format}) — Stock : ${i.quantite} / Seuil : ${i.seuil} [Fournisseur : ${fourNom}]`;
+                }).join('\n');
+
+                const tableRowsHtml = articlesEnAlerte.map(item => {
+                    const isZero = Number(item.quantite) === 0;
+                    const isNewTrigger = nouveauxIds.includes(item.id);
+                    const fourNom = (item.fournisseurId && fournisseurs[item.fournisseurId]) ? fournisseurs[item.fournisseurId].nom : '—';
+                    
+                    const badgeEtat = isZero
+                        ? `<span style="background-color:#fee2e2; color:#b91c1c; padding:3px 8px; border-radius:9999px; font-size:11px; font-weight:bold; text-transform:uppercase;">Rupture (0)</span>`
+                        : `<span style="background-color:#ffedd5; color:#c2410c; padding:3px 8px; border-radius:9999px; font-size:11px; font-weight:bold;">Stock : ${item.quantite}</span>`;
+
+                    const badgeNouveau = isNewTrigger
+                        ? `<span style="background-color:#e3001b; color:#ffffff; padding:2px 6px; border-radius:4px; font-size:10px; font-weight:bold; margin-left:6px; text-transform:uppercase;">Vient de basculer</span>`
+                        : '';
+
+                    return `
+                        <tr style="border-bottom: 1px solid #e5e7eb;">
+                            <td style="padding: 12px 10px; font-size: 14px; color: #111827;">
+                                <div style="font-weight: bold; color: #1a2b4c;">${item.nom} ${badgeNouveau}</div>
+                                <div style="font-size: 12px; color: #6b7280; margin-top: 2px;">${item.famille || 'Stock'} • ${item.format}</div>
+                            </td>
+                            <td style="padding: 12px 10px; text-align: center;">
+                                ${badgeEtat}
+                            </td>
+                            <td style="padding: 12px 10px; text-align: center; font-size: 13px; color: #4b5563; font-weight: 600;">
+                                ${item.seuil}
+                            </td>
+                            <td style="padding: 12px 10px; font-size: 13px; color: #374151;">
+                                ${fourNom}
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+
+                const htmlMessage = `
+                <!DOCTYPE html>
+                <html lang="fr">
+                <body style="margin:0; padding:0; background-color:#f3f4f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;">
+                    <div style="max-width:620px; margin:24px auto; background-color:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 4px 12px rgba(0,0,0,0.08); border:1px solid #e5e7eb;">
+                        
+                        <!-- En-tête Amicale Navy & Red -->
+                        <div style="background-color:#1a2b4c; color:#ffffff; padding:22px 24px; border-bottom:5px solid #e3001b;">
+                            <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#fca5a5; font-weight:bold; margin-bottom:4px;">
+                                ${isTest ? '🔧 TEST DE NOTIFICATION' : '🚨 ALERTE RÉAPPROVISIONNEMENT'}
+                            </div>
+                            <h1 style="margin:0; font-size:22px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">
+                                Amicale SP Rieumes
+                            </h1>
+                            <p style="margin:4px 0 0 0; font-size:13px; color:#d1d5db;">
+                                Gestion des stocks de la Réserve du Foyer
+                            </p>
+                        </div>
+
+                        <!-- Corps du message -->
+                        <div style="padding:24px;">
+                            <div style="background-color:#fef2f2; border-left:4px solid #e3001b; padding:14px 16px; border-radius:6px; margin-bottom:20px;">
+                                <p style="margin:0; font-size:14px; color:#1f2937; line-height:1.5;">
+                                    Suite à la sortie enregistrée par <strong style="color:#1a2b4c;">${declencheurNom}</strong> le <strong>${dateStr}</strong>, un ou plusieurs articles de la réserve ont atteint leur seuil critique.
+                                </p>
+                            </div>
+
+                            <h2 style="font-size:15px; font-weight:bold; color:#1a2b4c; text-transform:uppercase; margin:0 0 12px 0; border-bottom:2px solid #f3f4f6; padding-bottom:8px;">
+                                Récapitulatif des articles en alerte (${articlesEnAlerte.length})
+                            </h2>
+
+                            <table style="width:100%; border-collapse:collapse; text-align:left; background-color:#ffffff;">
+                                <thead>
+                                    <tr style="background-color:#f9fafb; border-bottom:2px solid #e5e7eb;">
+                                        <th style="padding:10px; font-size:11px; font-weight:bold; color:#6b7280; text-transform:uppercase;">Article</th>
+                                        <th style="padding:10px; font-size:11px; font-weight:bold; color:#6b7280; text-transform:uppercase; text-align:center;">État</th>
+                                        <th style="padding:10px; font-size:11px; font-weight:bold; color:#6b7280; text-transform:uppercase; text-align:center;">Seuil</th>
+                                        <th style="padding:10px; font-size:11px; font-weight:bold; color:#6b7280; text-transform:uppercase;">Fournisseur</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${tableRowsHtml}
+                                </tbody>
+                            </table>
+
+                            <div style="margin-top:24px; padding:14px; background-color:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; text-align:center;">
+                                <p style="margin:0; font-size:13px; color:#475569;">
+                                    Connectez-vous à l'application en mode <strong>Bureau</strong> et cliquez sur le bouton <strong>Commander</strong> en haut à droite pour générer automatiquement vos bons de commande par e-mail ou SMS.
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Pied de page -->
+                        <div style="background-color:#1a2b4c; color:#9ca3af; padding:14px 24px; text-align:center; font-size:11px;">
+                            © 2026 — Amicale des Sapeurs-Pompiers de Rieumes • Message automatique
+                        </div>
+                    </div>
+                </body>
+                </html>
+                `;
+
                 const payload = {
                     destinataires: emails,
-                    sujet: "🚨 Alerte Stock — Réserve Foyer Amicale SP Rieumes",
-                    message: `Suite à la sortie effectuée par ${declencheurNom}, un ou plusieurs articles ont atteint ou franchi le seuil d'alerte.\n\nArticles actuellement en rupture / alerte :\n${recapList}\n\nMerci de procéder au réapprovisionnement.\n\nLe Bureau de l'Amicale`
+                    sujet: `${isTest ? '[TEST] ' : ''}🚨 Alerte Stock (${articlesEnAlerte.length} art.) — Réserve Amicale SP Rieumes`,
+                    message: `Suite à la sortie effectuée par ${declencheurNom} (${dateStr}), voici les articles en rupture / alerte :\n\n${recapList}\n\nLe Bureau de l'Amicale`,
+                    htmlMessage: htmlMessage
                 };
 
                 fetch(GOOGLE_SCRIPT_URL, {
                     method: "POST",
                     mode: "no-cors",
-                    headers: { "Content-Type": "application/json" },
+                    headers: { "Content-Type": "text/plain;charset=utf-8" },
                     body: JSON.stringify(payload)
                 }).catch(err => console.error("Erreur d'envoi mail :", err));
             };
@@ -291,12 +394,12 @@
 
             const handleOpenAddModal = () => {
                 const defaultFam = famillesList.length > 0 ? famillesList[0].nom : 'Boissons';
-                setEditingProduct({ id: null, nom: '', famille: defaultFam, format: 'Canette 33cl', seuil: 5, quantite: 0, fournisseurId: '' });
+                setEditingProduct({ id: null, nom: '', famille: defaultFam, format: 'Canette 33cl', seuil: 5, quantite: 0, fournisseurId: '', alerteActive: true });
                 setShowProductModal(true);
             };
 
             const handleOpenEditModal = (item) => {
-                setEditingProduct({ ...item });
+                setEditingProduct({ ...item, alerteActive: item.alerteActive !== false });
                 setShowProductModal(true);
             };
 
@@ -307,7 +410,8 @@
                     famille: editingProduct.famille || (famillesList[0] ? famillesList[0].nom : 'Boissons'),
                     format: editingProduct.format || 'Unité',
                     seuil: Number(editingProduct.seuil) || 0,
-                    fournisseurId: editingProduct.fournisseurId || ''
+                    fournisseurId: editingProduct.fournisseurId || '',
+                    alerteActive: editingProduct.alerteActive !== false
                 };
 
                 if (editingProduct.id) {
@@ -317,6 +421,11 @@
                     db.ref('stock').push(payload);
                 }
                 setShowProductModal(false);
+            };
+
+            // Activer / Mettre en pause l'alerte directement depuis la carte de l'article
+            const handleToggleProductAlert = (id, currentStatus) => {
+                db.ref(`stock/${id}`).update({ alerteActive: !currentStatus });
             };
 
             const handleUpdateQty = (id, currentQty, amount) => {
@@ -514,7 +623,7 @@
                                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
                                     <div>
                                         <h2 class="text-2xl font-bold text-pompier-navy">Inventaire de la Réserve</h2>
-                                        <p class="text-xs text-gray-500">Gérez les fiches produits ou lancez un recalage rapide des quantités.</p>
+                                        <p class="text-xs text-gray-500">Gérez les fiches produits, mettez en pause les alertes ou lancez un inventaire flash.</p>
                                     </div>
                                     <div class="flex flex-wrap items-center gap-2">
                                         {!inventoryMode ? (
@@ -566,31 +675,46 @@
 
                                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                     {filteredStock.map(item => {
-                                        const isAlert = item.quantite <= item.seuil;
+                                        const isAlertActive = item.alerteActive !== false;
+                                        const isAlert = isAlertActive && item.quantite <= item.seuil;
                                         const invVal = inventoryCounts[item.id] !== undefined ? inventoryCounts[item.id] : item.quantite;
                                         const hasChanged = inventoryMode && Number(invVal) !== item.quantite;
                                         const statusBorder = hasChanged 
                                             ? 'border-amber-500 bg-amber-50/40 ring-2 ring-amber-200' 
-                                            : (isAlert ? 'border-red-500 bg-red-50/40' : 'border-gray-200 bg-white');
+                                            : (isAlert ? 'border-red-500 bg-red-50/40' : (!isAlertActive ? 'border-gray-200 bg-gray-50/70' : 'border-gray-200 bg-white'));
                                         
                                         return (
                                             <div key={item.id} class={`p-4 rounded-xl border-2 shadow-sm flex flex-col justify-between transition ${statusBorder}`}>
                                                 <div class="flex justify-between items-start">
                                                     <div class="flex-1">
-                                                        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-pompier-navy uppercase tracking-wider">{item.famille}</span>
-                                                        {isAlert && <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-600 text-white uppercase ml-1">Alerte</span>}
-                                                        {item.popularite > 0 && (
-                                                            <span class="text-[10px] font-semibold text-gray-400 ml-1.5" title="Total sorti récemment">
-                                                                <i class="fa-solid fa-fire-flame-curved text-amber-500 mr-0.5"></i>{item.popularite}
-                                                            </span>
-                                                        )}
-                                                        <h3 class="font-bold text-lg text-gray-900 mt-1">{item.nom}</h3>
+                                                        <div class="flex flex-wrap items-center gap-1">
+                                                            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-pompier-navy uppercase tracking-wider">{item.famille}</span>
+                                                            {isAlert && <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-600 text-white uppercase">Alerte</span>}
+                                                            {!isAlertActive && (
+                                                                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-200 text-gray-600 uppercase flex items-center space-x-1">
+                                                                    <i class="fa-solid fa-bell-slash text-[9px] mr-1"></i><span>Alerte en pause</span>
+                                                                </span>
+                                                            )}
+                                                            {item.popularite > 0 && (
+                                                                <span class="text-[10px] font-semibold text-gray-400 ml-1" title="Total sorti récemment">
+                                                                    <i class="fa-solid fa-fire-flame-curved text-amber-500 mr-0.5"></i>{item.popularite}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <h3 class={`font-bold text-lg mt-1 ${!isAlertActive ? 'text-gray-500' : 'text-gray-900'}`}>{item.nom}</h3>
                                                         <p class="text-xs text-gray-500">{item.format} · Seuil : {item.seuil}</p>
                                                     </div>
                                                     {!inventoryMode && (
-                                                        <div class="flex space-x-1">
-                                                            <button onClick={() => handleOpenEditModal(item)} class="p-1.5 text-gray-400 hover:text-blue-600"><i class="fa-solid fa-pen-to-square"></i></button>
-                                                            <button onClick={() => handleRemoveStock(item.id, item.nom)} class="p-1.5 text-gray-400 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
+                                                        <div class="flex items-center space-x-1">
+                                                            <button 
+                                                                onClick={() => handleToggleProductAlert(item.id, isAlertActive)} 
+                                                                class={`p-1.5 rounded transition ${isAlertActive ? 'text-amber-500 hover:bg-amber-50' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-200'}`}
+                                                                title={isAlertActive ? "Alerte activée (Cliquer pour mettre en pause)" : "Alerte en pause (Cliquer pour réactiver)"}
+                                                            >
+                                                                <i class={`fa-solid ${isAlertActive ? 'fa-bell' : 'fa-bell-slash'}`}></i>
+                                                            </button>
+                                                            <button onClick={() => handleOpenEditModal(item)} class="p-1.5 text-gray-400 hover:text-blue-600" title="Modifier"><i class="fa-solid fa-pen-to-square"></i></button>
+                                                            <button onClick={() => handleRemoveStock(item.id, item.nom)} class="p-1.5 text-gray-400 hover:text-red-500" title="Supprimer"><i class="fa-solid fa-trash"></i></button>
                                                         </div>
                                                     )}
                                                 </div>
@@ -672,7 +796,17 @@
                         )}
 
                         {activeTab === 'securite' && isAdmin && (
-                            <SecuriteTab db={db} codesBureau={codesBureau} contactsAlerte={contactsAlerte} CODE_PURGE={CODE_PURGE} isSuperAdmin={isSuperAdmin} />
+                            <SecuriteTab 
+                                db={db} 
+                                codesBureau={codesBureau} 
+                                contactsAlerte={contactsAlerte} 
+                                CODE_PURGE={CODE_PURGE} 
+                                isSuperAdmin={isSuperAdmin}
+                                itemsInAlert={itemsInAlert}
+                                stockArray={stockArray}
+                                triggerEmailAlerts={triggerEmailAlerts}
+                                utilisateur={utilisateur}
+                            />
                         )}
                     </main>
 
@@ -748,7 +882,21 @@
                                             {Object.entries(fournisseurs).map(([fId, f]) => <option key={fId} value={fId}>{f.nom}</option>)}
                                         </select>
                                     </div>
-                                    <div class="pt-4">
+                                    <div class="pt-2">
+                                        <label class="flex items-center justify-between p-3 rounded-lg border bg-gray-50 cursor-pointer">
+                                            <div>
+                                                <span class="text-sm font-bold text-pompier-navy block">Surveillance & Alerte mail</span>
+                                                <span class="text-xs text-gray-500">Décochez pour suspendre temporairement cet article</span>
+                                            </div>
+                                            <input 
+                                                type="checkbox" 
+                                                checked={editingProduct.alerteActive !== false} 
+                                                onChange={e => setEditingProduct({...editingProduct, alerteActive: e.target.checked})}
+                                                class="w-5 h-5 accent-pompier-navy rounded cursor-pointer"
+                                            />
+                                        </label>
+                                    </div>
+                                    <div class="pt-2">
                                         <button type="submit" class="w-full bg-pompier-red text-white font-bold py-3 rounded-lg shadow-md"><i class="fa-solid fa-check mr-2"></i>Valider</button>
                                     </div>
                                 </form>
@@ -874,7 +1022,7 @@
                 localStorage.setItem('foyer_utilisateur', utilisateur.trim());
                 const articlesSortis = [];
                 const catalog = fullStock || stock;
-                let nouveauFranchissement = false;
+                const nouveauxIds = [];
                 const itemsEnAlerteActuels = [];
 
                 Object.entries(cart).forEach(([id, qtyToRemove]) => {
@@ -886,10 +1034,10 @@
                         onUpdateQty(id, ancienStock, -qty);
                         articlesSortis.push({ id, nom: item.nom, quantite: qty, format: item.format });
 
-                        // Vérifie si le produit vient de basculer en alerte (ou y est)
-                        if (nouveauStock <= item.seuil) {
+                        // Ignorer les articles dont l'alerte est en pause
+                        if (item.alerteActive !== false && nouveauStock <= item.seuil) {
                             if (ancienStock > item.seuil) {
-                                nouveauFranchissement = true; // Vient de franchir le seuil
+                                nouveauxIds.push(item.id);
                             }
                             itemsEnAlerteActuels.push({ ...item, quantite: nouveauStock });
                         }
@@ -905,12 +1053,11 @@
                     articles: articlesSortis
                 });
 
-                // Si un article vient de passer sous son seuil, déclencher les alertes mail
-                if (nouveauFranchissement) {
-                    // Récupérer aussi tous les autres produits déjà en alerte pour le récap complet
-                    const autresEnAlerte = catalog.filter(i => i.quantite <= i.seuil && !cart[i.id]);
+                if (nouveauxIds.length > 0) {
+                    // Exclure également du récapitulatif les autres articles qui ont leur alerte en pause
+                    const autresEnAlerte = catalog.filter(i => i.alerteActive !== false && i.quantite <= i.seuil && !cart[i.id]);
                     const tousLesAlerte = [...itemsEnAlerteActuels, ...autresEnAlerte];
-                    triggerEmailAlerts(utilisateur.trim(), tousLesAlerte);
+                    triggerEmailAlerts(utilisateur.trim(), tousLesAlerte, nouveauxIds, false);
                 }
 
                 setCart({});
@@ -939,13 +1086,14 @@
                                         const qtyInCart = cart[item.id] || 0;
                                         const remainingStock = item.quantite - qtyInCart;
                                         const isSelected = qtyInCart > 0;
+                                        const isAlertActive = item.alerteActive !== false;
                                         return (
                                             <div key={item.id} class={`border rounded-xl p-3 flex flex-col justify-between transition ${isSelected ? 'bg-red-50/40 border-pompier-red ring-1 ring-red-200' : 'bg-gray-50 border-gray-200'}`}>
                                                 <div class="flex justify-between items-start mb-2">
                                                     <div>
                                                         <h3 class="font-bold text-pompier-navy">{item.nom}</h3>
                                                         <span class="text-xs text-gray-500">
-                                                            Dispo réserve : <strong class={remainingStock <= item.seuil ? "text-red-600" : "text-gray-800"}>{remainingStock}</strong>
+                                                            Dispo réserve : <strong class={(isAlertActive && remainingStock <= item.seuil) ? "text-red-600" : "text-gray-800"}>{remainingStock}</strong>
                                                         </span>
                                                     </div>
                                                     <span class="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded shrink-0">{item.format}</span>
@@ -1140,10 +1288,10 @@
                         </div>
                     )}
                 </div>
-            )
+            );
         }
 
-        function SecuriteTab({ db, codesBureau, contactsAlerte, CODE_PURGE, isSuperAdmin }) {
+        function SecuriteTab({ db, codesBureau, contactsAlerte, CODE_PURGE, isSuperAdmin, itemsInAlert, stockArray, triggerEmailAlerts, utilisateur }) {
             const [newNom, setNewNom] = useState('');
             const [newPin, setNewPin] = useState('');
             
@@ -1190,6 +1338,20 @@
                 if (confirm(`Supprimer le contact "${nom}" des alertes mail ?`)) db.ref(`parametres/contactsAlerte/${id}`).remove();
             };
 
+            const handleTestEmail = () => {
+                const activeContacts = Object.values(contactsAlerte).filter(c => c.actif && c.email);
+                if (activeContacts.length === 0) {
+                    return alert("Aucun contact actif ! Ajoute ou active au moins une adresse e-mail ci-dessous.");
+                }
+                const activeStock = stockArray.filter(i => i.alerteActive !== false);
+                const sampleItems = itemsInAlert.length > 0 
+                    ? itemsInAlert 
+                    : (activeStock.length > 0 ? [activeStock[0]] : [{ id: 'test', nom: 'Pack Coca-Cola (Exemple)', famille: 'Boissons', format: 'Pack 24x33cl', quantite: 2, seuil: 5 }]);
+                
+                triggerEmailAlerts(utilisateur.trim() || "Administrateur (Test)", sampleItems, [sampleItems[0].id], true);
+                alert(`📧 E-mail de test HTML envoyé à ${activeContacts.length} contact(s) actif(s) !`);
+            };
+
             return (
                 <div class="max-w-4xl mx-auto space-y-8">
                     <div class="mb-6">
@@ -1200,8 +1362,22 @@
                     </div>
 
                     <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-                        <h3 class="font-bold text-lg text-pompier-navy mb-4"><i class="fa-solid fa-envelope-circle-check mr-2"></i>Destinataires des e-mails d'alerte</h3>
-                        <p class="text-xs text-gray-500 mb-4">Ajoutez les personnes à prévenir en cas de rupture de stock. Vous pouvez activer ou désactiver l'envoi pour chaque personne (ex: en cas de congés).</p>
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                            <div>
+                                <h3 class="font-bold text-lg text-pompier-navy"><i class="fa-solid fa-envelope-circle-check mr-2"></i>Destinataires des e-mails d'alerte</h3>
+                                <p class="text-xs text-gray-500 mt-1">Ajoutez les personnes à prévenir en cas de rupture de stock. Vous pouvez mettre en pause un contact (ex: congés).</p>
+                            </div>
+                            {isSuperAdmin && (
+                                <button 
+                                    type="button"
+                                    onClick={handleTestEmail}
+                                    class="bg-pompier-red hover:bg-red-700 text-white text-xs font-bold px-3.5 py-2 rounded-lg shadow-sm flex items-center space-x-1.5 self-start sm:self-auto shrink-0 transition"
+                                >
+                                    <i class="fa-solid fa-paper-plane"></i>
+                                    <span>Envoyer un mail de test</span>
+                                </button>
+                            )}
+                        </div>
                         
                         {isSuperAdmin && (
                             <form onSubmit={handleAddContact} class="flex flex-col sm:flex-row gap-2 mb-6">
@@ -1301,7 +1477,8 @@
 
         function OrderModal({ onClose, stock, fournisseurs }) {
             const [orderQties, setOrderQties] = useState({});
-            const toOrder = stock.filter(item => item.quantite <= item.seuil);
+            // Exclure de la préparation de commande les articles dont l'alerte est en pause
+            const toOrder = stock.filter(item => item.alerteActive !== false && item.quantite <= item.seuil);
             
             useEffect(() => {
                 const initial = {};
@@ -1353,7 +1530,7 @@
                         </div>
                         <div class="p-6 overflow-y-auto">
                             {toOrder.length === 0 ? (
-                                <p class="text-center text-gray-500 py-8 font-bold">Aucun produit en rupture, tout est au vert !</p>
+                                <p class="text-center text-gray-500 py-8 font-bold">Aucun produit actif en rupture, tout est au vert !</p>
                             ) : (
                                 Object.keys(groupedOrders).map(fId => {
                                     const items = groupedOrders[fId];
