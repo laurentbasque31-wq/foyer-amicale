@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestion Stock - Amicale SP Rieumes</title>
+    <title>Gestion Stock - Amicale des Sapeurs Pompiers de Rieumes</title>
     <link rel="icon" href="./logo.png" type="image/png">
     <link rel="apple-touch-icon" href="./logo.png">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -41,13 +41,46 @@
         input[type=number] {
             -moz-appearance: textfield;
         }
+
+        /* Règles spécifiques pour le Centre d'Impression A4 / PDF */
+        @media print {
+            @page {
+                size: A4 portrait;
+                margin: 12mm;
+            }
+            body {
+                background-color: #ffffff !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            .no-print {
+                display: none !important;
+            }
+            .print-only {
+                display: block !important;
+            }
+            .print-sheet {
+                box-shadow: none !important;
+                border: none !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 100% !important;
+                max-width: 100% !important;
+            }
+        }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen flex flex-col justify-between">
     <div id="root" class="flex-grow"></div>
 
-    <footer class="bg-pompier-navy text-gray-400 text-xs py-4 text-center border-t border-gray-800">
-        <p>© 2026 — Conçu et développé par <strong>Laurent Basque</strong> · Amicale des Sapeurs-Pompiers de Rieumes</p>
+    <footer class="no-print bg-pompier-navy text-gray-300 text-xs py-5 px-4 text-center border-t-2 border-pompier-red space-y-1.5">
+        <p class="font-bold text-white uppercase tracking-wider">Amicale des Sapeurs Pompiers de Rieumes</p>
+        <p class="text-gray-400">
+            <i class="fa-solid fa-location-dot text-pompier-red mr-1"></i> 3 Bld des Vignes 31370 RIEUMES · 
+            <i class="fa-solid fa-envelope text-pompier-red mx-1"></i> amicalepompiersderieumes@hotmail.fr · 
+            <i class="fa-solid fa-phone text-pompier-red mx-1"></i> Contact : Le Président Laurent Basque (06 14 20 15 73)
+        </p>
+        <p class="text-[11px] text-gray-500 pt-1">© 2026 — Conçu et développé par <strong>Laurent Basque</strong></p>
     </footer>
 
     <script type="text/babel">
@@ -55,6 +88,18 @@
 
         // CODE ADMINISTRATEUR SUPRÊME
         const CODE_PURGE = "0801"; 
+
+        // COORDONNÉES OFFICIELLES FIGÉES DE L'AMICALE
+        const AMICALE_INFO = {
+            nom: "Amicale des Sapeurs Pompiers de Rieumes",
+            adresse: "3 Bld des Vignes 31370 RIEUMES",
+            email: "amicalepompiersderieumes@hotmail.fr",
+            contact: "Le Président Laurent Basque",
+            signataire: "Laurent Basque",
+            fonctionSignataire: "Président de l'Amicale",
+            tel: "0614201573",
+            telFormat: "06 14 20 15 73"
+        };
 
         // URL de la passerelle Google Apps Script
         const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyo7ru7U_NlAOapdJk36qsS7XZqWCY20L43jDibIyCqJ-eFpIAC_cqU2InwG_55COdBFQ/exec";
@@ -102,7 +147,6 @@
             
             const [showProductModal, setShowProductModal] = useState(false);
             const [editingProduct, setEditingProduct] = useState(null);
-            const [showOrderModal, setShowOrderModal] = useState(false);
             const [showRestockModal, setShowRestockModal] = useState(false);
             const [restockItem, setRestockItem] = useState(null);
             const [restockQty, setRestockQty] = useState('');
@@ -172,7 +216,7 @@
                 id,
                 famille: data.famille || (famillesList[0] ? famillesList[0].nom : 'Boissons'),
                 popularite: popularityMap[id] || 0,
-                alerteActive: data.alerteActive !== false, // Actif par défaut
+                alerteActive: data.alerteActive !== false,
                 ...data
             }));
 
@@ -198,7 +242,7 @@
             // Un article est en alerte uniquement si son alerte n'est pas en pause ET que sa quantité <= seuil
             const itemsInAlert = stockArray.filter(item => item.alerteActive !== false && item.quantite <= item.seuil);
 
-            // Construction et envoi de l'e-mail HTML aux couleurs de l'Amicale
+            // Construction et envoi de l'e-mail HTML d'alerte aux couleurs de l'Amicale
             const triggerEmailAlerts = (declencheurNom, articlesEnAlerte, nouveauxIds = [], isTest = false) => {
                 const activeContacts = Object.values(contactsAlerte).filter(c => c.actif && c.email);
                 if (activeContacts.length === 0 || articlesEnAlerte.length === 0) return;
@@ -209,14 +253,17 @@
                 });
 
                 const recapList = articlesEnAlerte.map(i => {
-                    const fourNom = (i.fournisseurId && fournisseurs[i.fournisseurId]) ? fournisseurs[i.fournisseurId].nom : 'Non attribué';
+                    const fObj = (i.fournisseurId && fournisseurs[i.fournisseurId]) ? fournisseurs[i.fournisseurId] : null;
+                    const fourNom = fObj ? `${fObj.nom}${fObj.numCompte ? ` (Compte: ${fObj.numCompte})` : ''}` : 'Non attribué';
                     return `• ${i.nom} (${i.format}) — Stock : ${i.quantite} / Seuil : ${i.seuil} [Fournisseur : ${fourNom}]`;
                 }).join('\n');
 
                 const tableRowsHtml = articlesEnAlerte.map(item => {
                     const isZero = Number(item.quantite) === 0;
                     const isNewTrigger = nouveauxIds.includes(item.id);
-                    const fourNom = (item.fournisseurId && fournisseurs[item.fournisseurId]) ? fournisseurs[item.fournisseurId].nom : '—';
+                    const fObj = (item.fournisseurId && fournisseurs[item.fournisseurId]) ? fournisseurs[item.fournisseurId] : null;
+                    const fourNom = fObj ? fObj.nom : '—';
+                    const fourCompte = (fObj && fObj.numCompte) ? `<div style="font-size:11px; color:#1a2b4c; font-weight:bold;">N° ${fObj.numCompte}</div>` : '';
                     
                     const badgeEtat = isZero
                         ? `<span style="background-color:#fee2e2; color:#b91c1c; padding:3px 8px; border-radius:9999px; font-size:11px; font-weight:bold; text-transform:uppercase;">Rupture (0)</span>`
@@ -239,7 +286,8 @@
                                 ${item.seuil}
                             </td>
                             <td style="padding: 12px 10px; font-size: 13px; color: #374151;">
-                                ${fourNom}
+                                <div>${fourNom}</div>
+                                ${fourCompte}
                             </td>
                         </tr>
                     `;
@@ -251,20 +299,18 @@
                 <body style="margin:0; padding:0; background-color:#f3f4f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;">
                     <div style="max-width:620px; margin:24px auto; background-color:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 4px 12px rgba(0,0,0,0.08); border:1px solid #e5e7eb;">
                         
-                        <!-- En-tête Amicale Navy & Red -->
                         <div style="background-color:#1a2b4c; color:#ffffff; padding:22px 24px; border-bottom:5px solid #e3001b;">
                             <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#fca5a5; font-weight:bold; margin-bottom:4px;">
                                 ${isTest ? '🔧 TEST DE NOTIFICATION' : '🚨 ALERTE RÉAPPROVISIONNEMENT'}
                             </div>
-                            <h1 style="margin:0; font-size:22px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">
-                                Amicale SP Rieumes
+                            <h1 style="margin:0; font-size:20px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">
+                                ${AMICALE_INFO.nom}
                             </h1>
                             <p style="margin:4px 0 0 0; font-size:13px; color:#d1d5db;">
                                 Gestion des stocks de la Réserve du Foyer
                             </p>
                         </div>
 
-                        <!-- Corps du message -->
                         <div style="padding:24px;">
                             <div style="background-color:#fef2f2; border-left:4px solid #e3001b; padding:14px 16px; border-radius:6px; margin-bottom:20px;">
                                 <p style="margin:0; font-size:14px; color:#1f2937; line-height:1.5;">
@@ -292,14 +338,15 @@
 
                             <div style="margin-top:24px; padding:14px; background-color:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; text-align:center;">
                                 <p style="margin:0; font-size:13px; color:#475569;">
-                                    Connectez-vous à l'application en mode <strong>Bureau</strong> et cliquez sur le bouton <strong>Commander</strong> en haut à droite pour générer automatiquement vos bons de commande par e-mail ou SMS.
+                                    Rendez-vous dans l'onglet <strong>Commandes & Bons</strong> de l'application pour imprimer ou envoyer vos bons de commande avec pièce jointe PDF.
                                 </p>
                             </div>
                         </div>
 
-                        <!-- Pied de page -->
-                        <div style="background-color:#1a2b4c; color:#9ca3af; padding:14px 24px; text-align:center; font-size:11px;">
-                            © 2026 — Amicale des Sapeurs-Pompiers de Rieumes • Message automatique
+                        <div style="background-color:#1a2b4c; color:#d1d5db; padding:16px 24px; text-align:center; font-size:11px; line-height:1.6;">
+                            <div style="font-weight:bold; color:#ffffff; text-transform:uppercase;">${AMICALE_INFO.nom}</div>
+                            <div>${AMICALE_INFO.adresse} • ${AMICALE_INFO.email}</div>
+                            <div>Contact : ${AMICALE_INFO.contact} (${AMICALE_INFO.telFormat})</div>
                         </div>
                     </div>
                 </body>
@@ -308,8 +355,8 @@
 
                 const payload = {
                     destinataires: emails,
-                    sujet: `${isTest ? '[TEST] ' : ''}🚨 Alerte Stock (${articlesEnAlerte.length} art.) — Réserve Amicale SP Rieumes`,
-                    message: `Suite à la sortie effectuée par ${declencheurNom} (${dateStr}), voici les articles en rupture / alerte :\n\n${recapList}\n\nLe Bureau de l'Amicale`,
+                    sujet: `${isTest ? '[TEST] ' : ''}🚨 Alerte Stock (${articlesEnAlerte.length} art.) — ${AMICALE_INFO.nom}`,
+                    message: `Suite à la sortie effectuée par ${declencheurNom} (${dateStr}), voici les articles en rupture / alerte :\n\n${recapList}\n\n${AMICALE_INFO.nom}\n${AMICALE_INFO.adresse}\nContact : ${AMICALE_INFO.contact} (${AMICALE_INFO.telFormat})\nEmail : ${AMICALE_INFO.email}`,
                     htmlMessage: htmlMessage
                 };
 
@@ -423,7 +470,6 @@
                 setShowProductModal(false);
             };
 
-            // Activer / Mettre en pause l'alerte directement depuis la carte de l'article
             const handleToggleProductAlert = (id, currentStatus) => {
                 db.ref(`stock/${id}`).update({ alerteActive: !currentStatus });
             };
@@ -485,7 +531,7 @@
 
             const handleAddFournisseur = () => {
                 const nom = prompt("Nom du fournisseur :");
-                if (nom) db.ref('fournisseurs').push({ nom, email: "", tel: "", siteWeb: "" });
+                if (nom) db.ref('fournisseurs').push({ nom, numCompte: "", email: "", tel: "", siteWeb: "" });
             };
 
             const handleUpdateFournisseur = (id, field, value) => {
@@ -496,27 +542,33 @@
                 if (confirm("Supprimer ce fournisseur ?")) db.ref(`fournisseurs/${id}`).remove();
             };
 
+            const handleCopyAmicaleInfo = () => {
+                const text = `${AMICALE_INFO.nom}\nAdresse : ${AMICALE_INFO.adresse}\nEmail : ${AMICALE_INFO.email}\nContact : ${AMICALE_INFO.contact} (${AMICALE_INFO.telFormat})`;
+                navigator.clipboard.writeText(text);
+                alert("📋 Coordonnées de l'Amicale copiées dans le presse-papier !");
+            };
+
             return (
                 <div>
-                    <header class="bg-pompier-navy text-white shadow-lg border-b-4 border-pompier-red">
+                    <header class="no-print bg-pompier-navy text-white shadow-lg border-b-4 border-pompier-red">
                         <div class="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
                             <div class="flex items-center space-x-4">
                                 <div class="bg-white p-1 rounded-xl shadow">
                                     <img src="./logo.png" alt="Écusson" class="h-14 w-14 object-contain" />
                                 </div>
                                 <div>
-                                    <h1 class="text-2xl font-bold uppercase tracking-wider">Amicale SP Rieumes</h1>
-                                    <p class="text-gray-300 text-sm">Gestion des stocks de la Réserve</p>
+                                    <h1 class="text-lg sm:text-2xl font-bold uppercase tracking-wider leading-tight">{AMICALE_INFO.nom}</h1>
+                                    <p class="text-gray-300 text-xs sm:text-sm">Gestion des stocks de la Réserve · 3 Bld des Vignes</p>
                                 </div>
                             </div>
                             
                             <div class="flex items-center space-x-2">
                                 {isAdmin && (
                                     <button 
-                                        onClick={() => setShowOrderModal(true)}
+                                        onClick={() => { setActiveTab('commandes'); setInventoryMode(false); }}
                                         class={`px-3 sm:px-4 py-2 rounded-lg font-bold flex items-center space-x-2 transition-colors ${itemsInAlert.length > 0 ? 'bg-pompier-red hover:bg-red-700 animate-pulse' : 'bg-gray-600 hover:bg-gray-500'}`}
                                     >
-                                        <i class="fa-solid fa-cart-shopping"></i>
+                                        <i class="fa-solid fa-print"></i>
                                         <span class="hidden sm:inline">Commander</span>
                                         {itemsInAlert.length > 0 && (
                                             <span class="bg-white text-pompier-red px-2 py-0.5 rounded-full text-sm font-bold">
@@ -548,6 +600,15 @@
                                     <button onClick={() => setActiveTab('stock')} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'stock' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
                                         <i class="fa-solid fa-boxes-stacked"></i><span>Stocks</span>
                                     </button>
+                                    <button onClick={() => { setActiveTab('commandes'); setInventoryMode(false); }} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'commandes' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
+                                        <i class="fa-solid fa-file-invoice"></i>
+                                        <span>Commandes & Bons</span>
+                                        {itemsInAlert.length > 0 && (
+                                            <span class="bg-pompier-red text-white text-[11px] px-1.5 py-0.2 rounded-full font-bold ml-1">
+                                                {itemsInAlert.length}
+                                            </span>
+                                        )}
+                                    </button>
                                     <button onClick={() => { setActiveTab('historique'); setInventoryMode(false); }} class={`px-4 sm:px-5 py-2 rounded-t-lg font-semibold flex items-center space-x-2 shrink-0 ${activeTab === 'historique' ? 'bg-gray-100 text-pompier-navy' : 'bg-pompier-navy text-gray-300 hover:bg-gray-700'}`}>
                                         <i class="fa-solid fa-clock-rotate-left"></i><span>Historique</span>
                                     </button>
@@ -564,7 +625,7 @@
 
                     <main class="max-w-6xl mx-auto px-4 py-6">
                         {(activeTab === 'sorties' || (activeTab === 'stock' && isAdmin)) && (
-                            <div class="mb-6 space-y-3">
+                            <div class="no-print mb-6 space-y-3">
                                 <div class="flex flex-col sm:flex-row gap-3">
                                     <div class="relative flex-1">
                                         <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"></i>
@@ -619,7 +680,7 @@
                         )}
 
                         {activeTab === 'stock' && isAdmin && (
-                            <div>
+                            <div class="no-print">
                                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
                                     <div>
                                         <h2 class="text-2xl font-bold text-pompier-navy">Inventaire de la Réserve</h2>
@@ -759,12 +820,44 @@
                             </div>
                         )}
 
+                        {activeTab === 'commandes' && isAdmin && (
+                            <CommandesTab 
+                                stock={stockArray} 
+                                fournisseurs={fournisseurs} 
+                                contactsAlerte={contactsAlerte} 
+                            />
+                        )}
+
                         {activeTab === 'historique' && isAdmin && (
                             <HistoriqueTab db={db} CODE_PURGE={CODE_PURGE} isSuperAdmin={isSuperAdmin} />
                         )}
 
                         {activeTab === 'fournisseurs' && isAdmin && (
-                            <div>
+                            <div class="no-print">
+                                {/* Carte Coordonnées Figées de l'Amicale */}
+                                <div class="bg-blue-50 border-l-4 border-pompier-navy p-4 rounded-xl shadow-sm mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                    <div class="space-y-1">
+                                        <div class="flex items-center space-x-2">
+                                            <span class="bg-pompier-navy text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase">Coordonnées Officielles (Figées)</span>
+                                        </div>
+                                        <h3 class="font-bold text-pompier-navy text-base">{AMICALE_INFO.nom}</h3>
+                                        <p class="text-xs text-gray-700">
+                                            <i class="fa-solid fa-location-dot text-pompier-red mr-1"></i> {AMICALE_INFO.adresse} · 
+                                            <i class="fa-solid fa-envelope text-pompier-red mx-1.5"></i> {AMICALE_INFO.email}
+                                        </p>
+                                        <p class="text-xs text-gray-700">
+                                            <i class="fa-solid fa-user-tie text-pompier-navy mr-1"></i> Contact : <strong>{AMICALE_INFO.contact}</strong> ({AMICALE_INFO.telFormat})
+                                        </p>
+                                    </div>
+                                    <button 
+                                        onClick={handleCopyAmicaleInfo}
+                                        class="bg-white hover:bg-gray-100 text-pompier-navy border border-blue-200 px-3 py-2 rounded-lg text-xs font-bold shadow-sm flex items-center space-x-1.5 shrink-0 transition"
+                                    >
+                                        <i class="fa-regular fa-copy"></i>
+                                        <span>Copier nos coordonnées</span>
+                                    </button>
+                                </div>
+
                                 <div class="flex justify-between items-center mb-6">
                                     <h2 class="text-2xl font-bold text-pompier-navy">Fournisseurs</h2>
                                     <button onClick={handleAddFournisseur} class="bg-pompier-navy text-white px-4 py-2 rounded shadow hover:bg-blue-900">
@@ -774,11 +867,21 @@
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     {Object.entries(fournisseurs).map(([id, f]) => (
                                         <div key={id} class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 relative group">
-                                            <button onClick={() => handleRemoveFournisseur(id)} class="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors"><i class="fa-solid fa-trash"></i></button>
+                                            <button onClick={() => handleRemoveFournisseur(id)} class="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors" title="Supprimer ce fournisseur"><i class="fa-solid fa-trash"></i></button>
                                             <h3 class="font-bold text-lg mb-3 text-pompier-navy pr-8">{f.nom}</h3>
                                             <div class="space-y-2">
-                                                <div class="flex items-center"><i class="fa-solid fa-envelope w-6 text-gray-400"></i><input type="email" placeholder="Email" value={f.email} onChange={(e) => handleUpdateFournisseur(id, 'email', e.target.value)} class="flex-1 bg-gray-50 border rounded px-2 py-1 text-sm outline-none focus:border-pompier-red"/></div>
-                                                <div class="flex items-center"><i class="fa-solid fa-phone w-6 text-gray-400"></i><input type="tel" placeholder="Téléphone" value={f.tel} onChange={(e) => handleUpdateFournisseur(id, 'tel', e.target.value)} class="flex-1 bg-gray-50 border rounded px-2 py-1 text-sm outline-none focus:border-pompier-red"/></div>
+                                                <div class="flex items-center">
+                                                    <i class="fa-solid fa-id-card w-6 text-pompier-navy" title="Numéro de compte client"></i>
+                                                    <input 
+                                                        type="text" 
+                                                        placeholder="N° de compte client (optionnel)" 
+                                                        value={f.numCompte || ''} 
+                                                        onChange={(e) => handleUpdateFournisseur(id, 'numCompte', e.target.value)} 
+                                                        class="flex-1 bg-blue-50/60 border border-blue-200 rounded px-2 py-1 text-sm font-semibold text-pompier-navy outline-none focus:border-pompier-red"
+                                                    />
+                                                </div>
+                                                <div class="flex items-center"><i class="fa-solid fa-envelope w-6 text-gray-400"></i><input type="email" placeholder="Email" value={f.email || ''} onChange={(e) => handleUpdateFournisseur(id, 'email', e.target.value)} class="flex-1 bg-gray-50 border rounded px-2 py-1 text-sm outline-none focus:border-pompier-red"/></div>
+                                                <div class="flex items-center"><i class="fa-solid fa-phone w-6 text-gray-400"></i><input type="tel" placeholder="Téléphone" value={f.tel || ''} onChange={(e) => handleUpdateFournisseur(id, 'tel', e.target.value)} class="flex-1 bg-gray-50 border rounded px-2 py-1 text-sm outline-none focus:border-pompier-red"/></div>
                                                 <div class="flex items-center">
                                                     <i class="fa-solid fa-globe w-6 text-gray-400"></i>
                                                     <input type="url" placeholder="Site web (https://...)" value={f.siteWeb || ''} onChange={(e) => handleUpdateFournisseur(id, 'siteWeb', e.target.value)} class="flex-1 bg-gray-50 border rounded px-2 py-1 text-sm outline-none focus:border-pompier-red"/>
@@ -811,7 +914,7 @@
                     </main>
 
                     {showAdminLogin && (
-                        <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
+                        <div class="no-print fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
                             <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden">
                                 <div class="bg-pompier-navy text-white px-5 py-4 flex justify-between items-center">
                                     <h2 class="text-lg font-bold"><i class="fa-solid fa-lock mr-2"></i>Accès Bureau</h2>
@@ -840,7 +943,7 @@
                     )}
 
                     {showProductModal && editingProduct && isAdmin && (
-                        <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
+                        <div class="no-print fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
                             <div class="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
                                 <div class="bg-pompier-navy text-white px-6 py-4 flex justify-between items-center">
                                     <h2 class="text-xl font-bold">{editingProduct.id ? 'Modifier le produit' : 'Nouveau Produit'}</h2>
@@ -879,7 +982,7 @@
                                         <label class="block text-sm font-bold mb-1">Fournisseur attitré</label>
                                         <select value={editingProduct.fournisseurId} onChange={e => setEditingProduct({...editingProduct, fournisseurId: e.target.value})} class="w-full border rounded p-2 bg-white">
                                             <option value="">-- Aucun --</option>
-                                            {Object.entries(fournisseurs).map(([fId, f]) => <option key={fId} value={fId}>{f.nom}</option>)}
+                                            {Object.entries(fournisseurs).map(([fId, f]) => <option key={fId} value={fId}>{f.nom}{f.numCompte ? ` (Compte: ${f.numCompte})` : ''}</option>)}
                                         </select>
                                     </div>
                                     <div class="pt-2">
@@ -905,7 +1008,7 @@
                     )}
 
                     {showManageFamillesModal && isAdmin && (
-                        <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
+                        <div class="no-print fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
                             <div class="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
                                 <div class="bg-pompier-navy text-white px-5 py-4 flex justify-between items-center">
                                     <h2 class="text-lg font-bold"><i class="fa-solid fa-tags mr-2"></i>Gérer les Familles</h2>
@@ -936,7 +1039,7 @@
                     )}
 
                     {showRestockModal && restockItem && isAdmin && (
-                        <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
+                        <div class="no-print fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
                             <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden">
                                 <div class="bg-emerald-600 text-white px-5 py-4 flex justify-between items-center">
                                     <h2 class="text-lg font-bold"><i class="fa-solid fa-arrow-down-to-bracket mr-2"></i>Entrée de stock</h2>
@@ -971,8 +1074,784 @@
                             </div>
                         </div>
                     )}
+                </div>
+            );
+        }
 
-                    {showOrderModal && isAdmin && <OrderModal onClose={() => setShowOrderModal(false)} stock={stockArray} fournisseurs={fournisseurs} />}
+        // ONGLET COMMANDES & CENTRE D'IMPRESSION A4 / PDF / MAIL AVEC PIÈCE JOINTE PDF
+        function CommandesTab({ stock, fournisseurs, contactsAlerte }) {
+            const [orderQties, setOrderQties] = useState({});
+            const [customAddedIds, setCustomAddedIds] = useState([]);
+            const [selectedFournisseurFilter, setSelectedFournisseurFilter] = useState('Tous');
+            const [previewSupplierId, setPreviewSupplierId] = useState(null);
+            const [orderNotes, setOrderNotes] = useState({});
+            const [selectedRecipientBySupplier, setSelectedRecipientBySupplier] = useState({});
+            const [addArticleSelect, setAddArticleSelect] = useState({});
+
+            // Initialiser avec les produits actifs en alerte
+            useEffect(() => {
+                setOrderQties(prev => {
+                    const next = { ...prev };
+                    stock.forEach(item => {
+                        const isAlert = item.alerteActive !== false && item.quantite <= item.seuil;
+                        if (isAlert && next[item.id] === undefined) {
+                            next[item.id] = Math.max(1, (item.seuil - item.quantite) + 2);
+                        }
+                    });
+                    return next;
+                });
+            }, [stock]);
+
+            const adjustQty = (id, amount) => {
+                setOrderQties(prev => ({ ...prev, [id]: Math.max(0, (Number(prev[id]) || 0) + amount) }));
+            };
+
+            const setDirectQty = (id, val) => {
+                const parsed = val === '' ? 0 : Math.max(0, parseInt(val, 10) || 0);
+                setOrderQties(prev => ({ ...prev, [id]: parsed }));
+            };
+
+            const handleAddExtraProduct = (fId) => {
+                const prodId = addArticleSelect[fId];
+                if (!prodId) return;
+                if (!customAddedIds.includes(prodId)) {
+                    setCustomAddedIds(prev => [...prev, prodId]);
+                }
+                setOrderQties(prev => ({ ...prev, [prodId]: Math.max(1, Number(prev[prodId]) || 1) }));
+                setAddArticleSelect(prev => ({ ...prev, [fId]: '' }));
+            };
+
+            const handleRemoveFromOrder = (id) => {
+                setOrderQties(prev => ({ ...prev, [id]: 0 }));
+                setCustomAddedIds(prev => prev.filter(item => item !== id));
+            };
+
+            // Liste de tous les fournisseurs + groupe "unassigned"
+            const supplierIds = useMemo(() => {
+                const ids = Object.keys(fournisseurs);
+                const hasUnassigned = stock.some(i => !i.fournisseurId || !fournisseurs[i.fournisseurId]);
+                if (hasUnassigned) ids.push('unassigned');
+                return ids;
+            }, [fournisseurs, stock]);
+
+            // Regrouper les articles par fournisseur
+            const groupedOrders = useMemo(() => {
+                const groups = {};
+                supplierIds.forEach(fId => {
+                    const supplierProducts = stock.filter(item => {
+                        const itemFId = (item.fournisseurId && fournisseurs[item.fournisseurId]) ? item.fournisseurId : 'unassigned';
+                        if (itemFId !== fId) return false;
+                        const isAlert = item.alerteActive !== false && item.quantite <= item.seuil;
+                        const isCustom = customAddedIds.includes(item.id);
+                        const hasQty = (orderQties[item.id] || 0) > 0;
+                        return isAlert || isCustom || hasQty;
+                    });
+                    if (supplierProducts.length > 0 || fId !== 'unassigned') {
+                        groups[fId] = supplierProducts;
+                    }
+                });
+                return groups;
+            }, [supplierIds, stock, fournisseurs, customAddedIds, orderQties]);
+
+            const getOrderNumber = (fId) => {
+                const now = new Date();
+                const yyyy = now.getFullYear();
+                const mm = String(now.getMonth() + 1).padStart(2, '0');
+                const dd = String(now.getDate()).padStart(2, '0');
+                const suffix = fId === 'unassigned' ? 'DIV' : fId.slice(-3).toUpperCase();
+                return `BC-${yyyy}${mm}${dd}-${suffix}`;
+            };
+
+            // Envoi du Bon de Commande par mail (Objet + Corps HTML + Pièce jointe PDF A4 avec logo)
+            const handleSendPurchaseOrderEmail = (fId, targetChoice) => {
+                const fData = fId === 'unassigned' ? { nom: "Fournisseur Divers", numCompte: "", email: "", tel: "" } : (fournisseurs[fId] || { nom: "Fournisseur" });
+                const items = (groupedOrders[fId] || []).filter(i => (orderQties[i.id] || 0) > 0);
+
+                if (items.length === 0) {
+                    return alert("Aucun article avec une quantité supérieure à 0 dans ce bon de commande.");
+                }
+
+                let targetEmails = [];
+                let targetLabel = "";
+
+                if (targetChoice === 'fournisseur') {
+                    if (!fData.email) return alert("Aucune adresse e-mail n'est renseignée sur la fiche de ce fournisseur.");
+                    targetEmails = [fData.email.trim()];
+                    targetLabel = `le fournisseur ${fData.nom} (${fData.email})`;
+                } else if (targetChoice === 'tous_contacts') {
+                    const active = Object.values(contactsAlerte).filter(c => c.actif && c.email);
+                    if (active.length === 0) return alert("Aucun contact d'alerte actif enregistré.");
+                    targetEmails = active.map(c => c.email.trim());
+                    targetLabel = `tous les contacts d'alerte actifs (${targetEmails.length})`;
+                } else if (targetChoice && targetChoice.startsWith('contact:')) {
+                    const cId = targetChoice.replace('contact:', '');
+                    const cObj = contactsAlerte[cId];
+                    if (!cObj || !cObj.email) return alert("Contact introuvable ou sans adresse e-mail.");
+                    targetEmails = [cObj.email.trim()];
+                    targetLabel = `${cObj.nom} (${cObj.email})`;
+                } else {
+                    return alert("Veuillez choisir un destinataire valide.");
+                }
+
+                const numBon = getOrderNumber(fId);
+                const dateStr = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                const note = (orderNotes[fId] || '').trim();
+                const totalUnitCount = items.reduce((acc, i) => acc + (Number(orderQties[i.id]) || 0), 0);
+                
+                // URL publique absolue du logo hébergé sur GitHub Pages
+                const logoPublicUrl = new URL('./logo.png', window.location.href).href;
+                const cleanSupplierName = (fData.nom || 'Fournisseur').replace(/[^a-zA-Z0-9_-]/g, '_');
+                const pdfFileName = `${numBon}_${cleanSupplierName}.pdf`;
+
+                const rowsHtml = items.map((item, idx) => `
+                    <tr style="border-bottom: 1px solid #d1d5db; background-color: ${idx % 2 === 0 ? '#ffffff' : '#f9fafb'};">
+                        <td style="padding: 10px 12px; font-size: 12px; color: #4b5563; text-align: center; border: 1px solid #d1d5db;">${idx + 1}</td>
+                        <td style="padding: 10px 12px; font-size: 13px; font-weight: bold; color: #1a2b4c; border: 1px solid #d1d5db;">${item.nom}</td>
+                        <td style="padding: 10px 12px; font-size: 12px; color: #4b5563; border: 1px solid #d1d5db;">${item.famille || 'Stock'}</td>
+                        <td style="padding: 10px 12px; font-size: 12px; color: #374151; font-weight: 600; border: 1px solid #d1d5db;">${item.format}</td>
+                        <td style="padding: 10px 12px; font-size: 14px; font-weight: 800; color: #e3001b; text-align: center; border: 1px solid #d1d5db;">${orderQties[item.id]}</td>
+                    </tr>
+                `).join('');
+
+                const textLines = items.map(i => `- ${orderQties[i.id]}x ${i.nom} (${i.format})`).join('\n');
+
+                // 1. CORPS DU MAIL HTML (message d'accompagnement + récapitulatif direct)
+                const htmlEmailBody = `
+                <!DOCTYPE html>
+                <html lang="fr">
+                <body style="margin:0; padding:0; background-color:#f3f4f6; font-family: Arial, Helvetica, sans-serif;">
+                    <div style="max-width:680px; margin:20px auto; background-color:#ffffff; border-radius:10px; overflow:hidden; border:1px solid #d1d5db;">
+                        <div style="background-color:#1a2b4c; color:#ffffff; padding:20px 24px; border-bottom:5px solid #e3001b;">
+                            <table style="width:100%; border-collapse:collapse;">
+                                <tr>
+                                    <td style="width:65px; vertical-align:middle;">
+                                        <img src="${logoPublicUrl}" alt="Logo" width="54" height="54" style="display:block; background:#ffffff; padding:3px; border-radius:8px; object-fit:contain;" />
+                                    </td>
+                                    <td style="vertical-align:middle; padding-left:10px;">
+                                        <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#fca5a5; font-weight:bold;">BON DE COMMANDE N° ${numBon}</div>
+                                        <h1 style="margin:3px 0 0 0; font-size:18px; font-weight:800; text-transform:uppercase; color:#ffffff;">${AMICALE_INFO.nom}</h1>
+                                        <div style="font-size:12px; color:#d1d5db; margin-top:2px;">${AMICALE_INFO.adresse} • Tél : ${AMICALE_INFO.telFormat}</div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+
+                        <div style="padding:24px;">
+                            <p style="font-size:14px; color:#1f2937; line-height:1.6; margin:0 0 16px 0;">
+                                Bonjour,<br/><br/>
+                                Veuillez trouver en <strong>pièce jointe (fichier PDF <em>${pdfFileName}</em>)</strong> ainsi que ci-dessous notre bon de commande N° <strong>${numBon}</strong> du <strong>${dateStr}</strong> pour l'<strong>${AMICALE_INFO.nom}</strong>.
+                            </p>
+
+                            <div style="background-color:#f8fafc; border:1px solid #cbd5e1; border-left:4px solid #1a2b4c; border-radius:6px; padding:12px 16px; margin-bottom:20px;">
+                                <div style="font-size:11px; text-transform:uppercase; color:#64748b; font-weight:bold;">Fournisseur Destinataire</div>
+                                <div style="font-size:16px; font-weight:800; color:#1a2b4c; margin-top:2px;">${fData.nom}</div>
+                                ${fData.numCompte ? `<div style="margin-top:6px; display:inline-block; background-color:#1a2b4c; color:#ffffff; padding:3px 10px; border-radius:4px; font-size:12px; font-weight:bold;">N° DE COMPTE CLIENT : ${fData.numCompte}</div>` : ''}
+                            </div>
+
+                            <table style="width:100%; border-collapse:collapse; text-align:left; border:1px solid #d1d5db;">
+                                <thead>
+                                    <tr style="background-color:#1a2b4c; color:#ffffff;">
+                                        <th style="padding:9px 10px; font-size:11px; text-transform:uppercase; width:36px; text-align:center;">Réf.</th>
+                                        <th style="padding:9px 10px; font-size:11px; text-transform:uppercase;">Désignation</th>
+                                        <th style="padding:9px 10px; font-size:11px; text-transform:uppercase;">Famille</th>
+                                        <th style="padding:9px 10px; font-size:11px; text-transform:uppercase;">Format</th>
+                                        <th style="padding:9px 10px; font-size:11px; text-transform:uppercase; text-align:center; width:80px;">Quantité</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${rowsHtml}
+                                </tbody>
+                                <tfoot>
+                                    <tr style="background-color:#f3f4f6;">
+                                        <td colspan="4" style="padding:10px 12px; font-size:13px; font-weight:bold; color:#1a2b4c; text-align:right; border:1px solid #d1d5db;">Total d'unités commandées (${items.length} réf.) :</td>
+                                        <td style="padding:10px 12px; font-size:15px; font-weight:800; color:#1a2b4c; text-align:center; border:1px solid #d1d5db;">${totalUnitCount}</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+
+                            ${note ? `
+                                <div style="margin-top:16px; background-color:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:12px 14px;">
+                                    <div style="font-size:11px; font-weight:bold; text-transform:uppercase; color:#92400e; margin-bottom:4px;">Observations / Consignes de livraison :</div>
+                                    <div style="font-size:13px; color:#78350f; white-space:pre-line;">${note}</div>
+                                </div>
+                            ` : ''}
+
+                            <div style="margin-top:20px; padding-top:16px; border-top:1px solid #e5e7eb; font-size:13px; color:#374151; line-height:1.6;">
+                                <strong>Coordonnées de facturation et de livraison :</strong><br/>
+                                ${AMICALE_INFO.nom}<br/>
+                                ${AMICALE_INFO.adresse}<br/>
+                                Personne à contacter : <strong>${AMICALE_INFO.contact} (${AMICALE_INFO.telFormat})</strong><br/>
+                                E-mail : <a href="mailto:${AMICALE_INFO.email}" style="color:#e3001b; font-weight:bold;">${AMICALE_INFO.email}</a>
+                            </div>
+
+                            <p style="font-size:13px; color:#4b5563; margin-top:18px;">
+                                En vous remerciant par avance pour la bonne prise en compte de cette commande.<br/>
+                                Cordialement,<br/>
+                                <strong>${AMICALE_INFO.contact}</strong> — ${AMICALE_INFO.nom}
+                            </p>
+                        </div>
+                    </div>
+                </body>
+                </html>
+                `;
+
+                // 2. DOCUMENT A4 OFFICIEL POUR CONVERSION EN PIÈCE JOINTE PDF
+                const htmlForPdfAttachment = `
+                <!DOCTYPE html>
+                <html lang="fr">
+                <head>
+                    <meta charset="UTF-8">
+                    <style>
+                        @page { size: A4 portrait; margin: 14mm; }
+                        body { font-family: Arial, Helvetica, sans-serif; color: #111827; margin: 0; padding: 0; font-size: 12px; }
+                    </style>
+                </head>
+                <body>
+                    <table style="width:100%; border-collapse:collapse; border-bottom:4px solid #e3001b; padding-bottom:16px;">
+                        <tr>
+                            <td style="width:85px; vertical-align:top;">
+                                <img src="${logoPublicUrl}" alt="Logo Amicale" width="75" height="75" style="object-fit:contain;" />
+                            </td>
+                            <td style="vertical-align:top; padding-left:12px;">
+                                <div style="font-size:10px; font-weight:bold; text-transform:uppercase; color:#e3001b; letter-spacing:1px;">Réserve du Foyer</div>
+                                <div style="font-size:18px; font-weight:800; color:#1a2b4c; text-transform:uppercase; margin-top:2px;">${AMICALE_INFO.nom}</div>
+                                <div style="font-size:11px; color:#374151; margin-top:6px; line-height:1.5;">
+                                    Adresse : <strong>${AMICALE_INFO.adresse}</strong><br/>
+                                    E-mail : ${AMICALE_INFO.email}<br/>
+                                    Contact : <strong>${AMICALE_INFO.contact} (${AMICALE_INFO.telFormat})</strong>
+                                </div>
+                            </td>
+                            <td style="vertical-align:top; text-align:right; width:210px;">
+                                <div style="border:2px solid #1a2b4c; background-color:#f8fafc; border-radius:8px; padding:10px 12px; text-align:right;">
+                                    <div style="font-size:9px; font-weight:bold; text-transform:uppercase; color:#6b7280;">Document Officiel</div>
+                                    <div style="font-size:15px; font-weight:800; color:#1a2b4c; text-transform:uppercase; margin-top:2px;">BON DE COMMANDE</div>
+                                    <div style="font-size:13px; font-weight:bold; color:#e3001b; margin-top:4px;">N° ${numBon}</div>
+                                    <div style="font-size:11px; color:#374151; margin-top:2px;">Date : <strong>${dateStr}</strong></div>
+                                </div>
+                            </td>
+                        </tr>
+                    </table>
+
+                    <table style="width:100%; border-collapse:collapse; margin-top:20px; margin-bottom:20px;">
+                        <tr>
+                            <td style="width:48%; vertical-align:top; background-color:#f9fafb; border:1px solid #d1d5db; border-radius:6px; padding:12px;">
+                                <div style="font-size:10px; font-weight:bold; text-transform:uppercase; color:#6b7280; margin-bottom:4px;">Adresse de facturation & livraison</div>
+                                <div style="font-size:13px; font-weight:bold; color:#1a2b4c;">${AMICALE_INFO.nom}</div>
+                                <div style="font-size:12px; color:#1f2937; margin-top:4px; line-height:1.5;">
+                                    ${AMICALE_INFO.adresse}<br/>
+                                    Contact : <strong>${AMICALE_INFO.contact}</strong><br/>
+                                    Tél : <strong>${AMICALE_INFO.telFormat}</strong><br/>
+                                    E-mail : ${AMICALE_INFO.email}
+                                </div>
+                            </td>
+                            <td style="width:4%;"></td>
+                            <td style="width:48%; vertical-align:top; background-color:#eff6ff; border:2px solid #1a2b4c; border-radius:6px; padding:12px;">
+                                <div style="font-size:10px; font-weight:bold; text-transform:uppercase; color:#1a2b4c; margin-bottom:4px;">Fournisseur Destinataire</div>
+                                <div style="font-size:16px; font-weight:800; color:#1a2b4c;">${fData.nom}</div>
+                                ${fData.numCompte ? `<div style="margin-top:8px; display:inline-block; background-color:#1a2b4c; color:#ffffff; font-size:11px; font-weight:bold; padding:4px 8px; border-radius:4px;">N° DE COMPTE CLIENT : ${fData.numCompte}</div>` : `<div style="font-size:11px; color:#6b7280; font-style:italic; margin-top:4px;">Pas de numéro de compte client renseigné</div>`}
+                                <div style="font-size:11px; color:#374151; margin-top:8px; line-height:1.5;">
+                                    ${fData.email ? `E-mail : <strong>${fData.email}</strong><br/>` : ''}
+                                    ${fData.tel ? `Téléphone : <strong>${fData.tel}</strong>` : ''}
+                                </div>
+                            </td>
+                        </tr>
+                    </table>
+
+                    <table style="width:100%; border-collapse:collapse; margin-top:10px;">
+                        <thead>
+                            <tr style="background-color:#1a2b4c; color:#ffffff;">
+                                <th style="padding:8px 10px; font-size:11px; text-transform:uppercase; border:1px solid #1a2b4c; width:40px; text-align:center;">Réf.</th>
+                                <th style="padding:8px 10px; font-size:11px; text-transform:uppercase; border:1px solid #1a2b4c; text-align:left;">Désignation de l'article</th>
+                                <th style="padding:8px 10px; font-size:11px; text-transform:uppercase; border:1px solid #1a2b4c; width:95px; text-align:left;">Famille</th>
+                                <th style="padding:8px 10px; font-size:11px; text-transform:uppercase; border:1px solid #1a2b4c; width:120px; text-align:left;">Conditionnement</th>
+                                <th style="padding:8px 10px; font-size:11px; text-transform:uppercase; border:1px solid #1a2b4c; width:80px; text-align:center;">Quantité</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rowsHtml}
+                        </tbody>
+                        <tfoot>
+                            <tr style="background-color:#f3f4f6;">
+                                <td colspan="4" style="padding:10px 12px; font-size:12px; font-weight:bold; color:#1a2b4c; text-align:right; border:1px solid #d1d5db;">TOTAL D'UNITÉS COMMANDÉES (${items.length} référence${items.length > 1 ? 's' : ''}) :</td>
+                                <td style="padding:10px 12px; font-size:15px; font-weight:800; color:#1a2b4c; text-align:center; border:1px solid #d1d5db;">${totalUnitCount}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+
+                    ${note ? `
+                        <div style="margin-top:18px; background-color:#fffbeb; border:1px solid #f59e0b; border-radius:6px; padding:10px 12px;">
+                            <div style="font-size:10px; font-weight:bold; text-transform:uppercase; color:#92400e; margin-bottom:4px;">Observations / Consignes de livraison :</div>
+                            <div style="font-size:12px; color:#78350f; white-space:pre-line;">${note}</div>
+                        </div>
+                    ` : ''}
+
+                    <table style="width:100%; border-collapse:collapse; margin-top:28px;">
+                        <tr>
+                            <td style="width:55%; vertical-align:top; padding-right:16px; font-size:11px; color:#4b5563; line-height:1.5;">
+                                <strong>Merci de nous confirmer la bonne prise en compte de ce bon de commande.</strong><br/>
+                                Pour toute question concernant la livraison ou la facturation, merci de contacter ${AMICALE_INFO.contact} au <strong>${AMICALE_INFO.telFormat}</strong> ou par mail à <strong>${AMICALE_INFO.email}</strong>.
+                            </td>
+                            <td style="width:45%; vertical-align:top; border:1.5px solid #cbd5e1; background-color:#f9fafb; border-radius:8px; padding:12px; text-align:center;">
+                                <div style="font-size:10px; font-weight:bold; text-transform:uppercase; color:#1a2b4c;">Bon pour commande — Le Président</div>
+                                <div style="font-size:13px; font-weight:bold; color:#111827; margin-top:4px;">${AMICALE_INFO.signataire}</div>
+                                <div style="font-size:10px; color:#6b7280; margin-top:2px;">Fait à Rieumes, le ${dateStr}</div>
+                                <div style="height:35px;"></div>
+                            </td>
+                        </tr>
+                    </table>
+                </body>
+                </html>
+                `;
+
+                const compteTxt = fData.numCompte ? `\nN° de compte client : ${fData.numCompte}` : '';
+                const textFallback = `Bonjour,\n\nVeuillez trouver en pièce jointe notre Bon de Commande ${numBon} (${dateStr}) pour l'${AMICALE_INFO.nom}.\nFournisseur : ${fData.nom}${compteTxt}\n\nArticles commandés :\n${textLines}\n${note ? `\nObservations : ${note}\n` : ''}\n--- Coordonnées de facturation et livraison ---\n${AMICALE_INFO.nom}\n${AMICALE_INFO.adresse}\nE-mail : ${AMICALE_INFO.email}\nContact : ${AMICALE_INFO.contact} (${AMICALE_INFO.telFormat})`;
+
+                const payload = {
+                    destinataires: targetEmails,
+                    sujet: `📄 Bon de Commande ${numBon} — ${AMICALE_INFO.nom}${fData.numCompte ? ` (Compte ${fData.numCompte})` : ''}`,
+                    message: textFallback,
+                    htmlMessage: htmlEmailBody,
+                    pdfHtml: htmlForPdfAttachment,
+                    pdfFileName: pdfFileName
+                };
+
+                fetch(GOOGLE_SCRIPT_URL, {
+                    method: "POST",
+                    mode: "no-cors",
+                    headers: { "Content-Type": "text/plain;charset=utf-8" },
+                    body: JSON.stringify(payload)
+                }).catch(err => console.error("Erreur d'envoi du bon :", err));
+
+                alert(`✅ Le Bon de Commande ${numBon} (avec la pièce jointe PDF "${pdfFileName}") a bien été envoyé par e-mail à ${targetLabel} !`);
+            };
+
+            const handleSMS = (fId, items) => {
+                const fData = fournisseurs[fId];
+                if (!fData || !fData.tel) return alert("Numéro du fournisseur non renseigné.");
+                const activeItems = items.filter(i => (orderQties[i.id] || 0) > 0);
+                if (activeItems.length === 0) return alert("Aucune quantité sélectionnée.");
+                const list = activeItems.map(i => `- ${orderQties[i.id]}x ${i.nom} (${i.format})`).join('\n');
+                const hasCompte = fData.numCompte && fData.numCompte.trim() !== '';
+                const compteSms = hasCompte ? `\nN° Compte client : ${fData.numCompte.trim()}` : '';
+
+                const body = `Bonjour, voici la commande pour l'${AMICALE_INFO.nom} :${compteSms}\n${list}\n\nAdresse : ${AMICALE_INFO.adresse}\nContact : ${AMICALE_INFO.contact} (${AMICALE_INFO.telFormat})\nMerci !`;
+                window.location.href = `sms:${fData.tel.replace(/\s+/g, '')}?body=${encodeURIComponent(body)}`;
+            };
+
+            // Si un fournisseur est ouvert dans le Centre d'Impression A4 / PDF
+            if (previewSupplierId) {
+                const fId = previewSupplierId;
+                const fData = fId === 'unassigned' ? { nom: "Sans Fournisseur Associé", numCompte: "", email: "", tel: "" } : (fournisseurs[fId] || { nom: "Fournisseur inconnu" });
+                const itemsToPrint = (groupedOrders[fId] || []).filter(i => (orderQties[i.id] || 0) > 0);
+                const numBon = getOrderNumber(fId);
+                const dateStr = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                const totalUnits = itemsToPrint.reduce((acc, i) => acc + (Number(orderQties[i.id]) || 0), 0);
+                const currentRecipient = selectedRecipientBySupplier[fId] || (fData.email ? 'fournisseur' : 'tous_contacts');
+
+                return (
+                    <div>
+                        {/* Barre d'outils du Centre d'Impression (masquée à l'impression papier/PDF) */}
+                        <div class="no-print bg-white p-4 rounded-xl shadow-md border-2 border-pompier-navy mb-6 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+                            <div class="flex items-center space-x-3">
+                                <button 
+                                    onClick={() => setPreviewSupplierId(null)} 
+                                    class="bg-gray-100 hover:bg-gray-200 text-pompier-navy font-bold px-3.5 py-2 rounded-lg text-sm flex items-center space-x-2 transition"
+                                >
+                                    <i class="fa-solid fa-arrow-left"></i>
+                                    <span>Retour aux bons</span>
+                                </button>
+                                <div>
+                                    <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-blue-100 text-pompier-navy">Centre d'impression & PDF</span>
+                                    <h2 class="font-bold text-lg text-pompier-navy">Bon de commande — {fData.nom}</h2>
+                                </div>
+                            </div>
+
+                            <div class="flex flex-wrap items-center gap-2">
+                                {/* Sélecteur d'envoi par mail direct avec pièce jointe PDF */}
+                                <div class="flex items-center bg-gray-50 border border-gray-300 rounded-lg p-1">
+                                    <select 
+                                        value={currentRecipient}
+                                        onChange={e => setSelectedRecipientBySupplier(prev => ({ ...prev, [fId]: e.target.value }))}
+                                        class="bg-transparent text-xs font-semibold text-pompier-navy px-2 py-1.5 outline-none"
+                                    >
+                                        {fData.email && <option value="fournisseur">📧 Fournisseur : {fData.nom} ({fData.email})</option>}
+                                        <option value="tous_contacts">🔔 Tous les contacts d'alerte actifs</option>
+                                        {Object.entries(contactsAlerte).map(([cId, c]) => (
+                                            <option key={cId} value={`contact:${cId}`}>👤 Contact : {c.nom} ({c.email})</option>
+                                        ))}
+                                    </select>
+                                    <button 
+                                        onClick={() => handleSendPurchaseOrderEmail(fId, currentRecipient)}
+                                        class="bg-pompier-red hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-md shadow-sm flex items-center space-x-1.5 transition"
+                                    >
+                                        <i class="fa-solid fa-file-pdf"></i>
+                                        <span>Envoyer Mail + PDF</span>
+                                    </button>
+                                </div>
+
+                                <button 
+                                    onClick={() => window.print()} 
+                                    class="bg-pompier-navy hover:bg-blue-900 text-white font-bold px-4 py-2.5 rounded-lg shadow flex items-center space-x-2 text-sm transition"
+                                >
+                                    <i class="fa-solid fa-print"></i>
+                                    <span>Imprimer / Enregistrer en PDF</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* FEUILLE A4 OFFICIELLE DU BON DE COMMANDE */}
+                        <div class="print-sheet bg-white max-w-4xl mx-auto p-8 sm:p-10 rounded-xl shadow-lg border border-gray-200 text-gray-900">
+                            <div class="flex flex-col sm:flex-row justify-between items-start border-b-4 border-pompier-red pb-6 gap-4">
+                                <div class="flex items-start space-x-4">
+                                    <img src="./logo.png" alt="Logo Amicale" class="h-20 w-20 object-contain shrink-0" />
+                                    <div>
+                                        <span class="text-[11px] font-extrabold uppercase tracking-widest text-pompier-red block">Réserve du Foyer</span>
+                                        <h1 class="text-xl sm:text-2xl font-extrabold text-pompier-navy uppercase leading-tight">{AMICALE_INFO.nom}</h1>
+                                        <div class="text-xs text-gray-600 mt-2 space-y-0.5">
+                                            <p><i class="fa-solid fa-location-dot text-pompier-red w-4"></i> <strong>{AMICALE_INFO.adresse}</strong></p>
+                                            <p><i class="fa-solid fa-envelope text-pompier-red w-4"></i> {AMICALE_INFO.email}</p>
+                                            <p><i class="fa-solid fa-phone text-pompier-red w-4"></i> Contact : <strong>{AMICALE_INFO.contact} ({AMICALE_INFO.telFormat})</strong></p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="bg-gray-50 border-2 border-pompier-navy rounded-xl p-4 text-right min-w-[210px] self-stretch sm:self-auto flex flex-col justify-center">
+                                    <span class="text-[10px] font-bold uppercase tracking-wider text-gray-500">Document Officiel</span>
+                                    <h2 class="text-lg font-extrabold text-pompier-navy uppercase">Bon de Commande</h2>
+                                    <p class="text-sm font-mono font-bold text-pompier-red mt-1">N° {numBon}</p>
+                                    <p class="text-xs text-gray-600 mt-0.5">Date : <strong>{dateStr}</strong></p>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 my-6">
+                                <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                                    <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Adresse de facturation & livraison</span>
+                                    <p class="font-bold text-sm text-pompier-navy">{AMICALE_INFO.nom}</p>
+                                    <p class="text-xs text-gray-700 mt-1">{AMICALE_INFO.adresse}</p>
+                                    <p class="text-xs text-gray-700 mt-1">Contact réception : <strong>{AMICALE_INFO.contact}</strong></p>
+                                    <p class="text-xs text-gray-700">Tél : <strong>{AMICALE_INFO.telFormat}</strong></p>
+                                    <p class="text-xs text-gray-700">E-mail : {AMICALE_INFO.email}</p>
+                                </div>
+
+                                <div class="bg-blue-50/50 p-4 rounded-lg border-2 border-pompier-navy">
+                                    <span class="text-[10px] font-bold uppercase tracking-wider text-pompier-navy block mb-1">Fournisseur Destinataire</span>
+                                    <p class="font-extrabold text-lg text-pompier-navy">{fData.nom}</p>
+                                    {fData.numCompte ? (
+                                        <div class="mt-2 inline-block bg-pompier-navy text-white text-xs font-bold px-3 py-1 rounded">
+                                            N° DE COMPTE CLIENT : {fData.numCompte}
+                                        </div>
+                                    ) : (
+                                        <p class="text-xs text-gray-400 italic mt-1">Pas de numéro de compte client renseigné</p>
+                                    )}
+                                    <div class="text-xs text-gray-700 mt-2 space-y-0.5">
+                                        {fData.email && <p>E-mail : <strong>{fData.email}</strong></p>}
+                                        {fData.tel && <p>Téléphone : <strong>{fData.tel}</strong></p>}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mt-6">
+                                <table class="w-full border-collapse border border-gray-300 text-left">
+                                    <thead>
+                                        <tr class="bg-pompier-navy text-white text-xs uppercase">
+                                            <th class="py-2.5 px-3 border border-gray-300 w-12 text-center">Réf.</th>
+                                            <th class="py-2.5 px-3 border border-gray-300">Désignation de l'article</th>
+                                            <th class="py-2.5 px-3 border border-gray-300 w-28">Famille</th>
+                                            <th class="py-2.5 px-3 border border-gray-300 w-36">Conditionnement</th>
+                                            <th class="py-2.5 px-3 border border-gray-300 w-28 text-center">Quantité</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-200 text-sm">
+                                        {itemsToPrint.length === 0 ? (
+                                            <tr>
+                                                <td colSpan="5" class="py-8 text-center text-gray-400 italic">Aucun article sélectionné dans ce bon.</td>
+                                            </tr>
+                                        ) : (
+                                            itemsToPrint.map((item, idx) => (
+                                                <tr key={item.id} class={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                                    <td class="py-2.5 px-3 border border-gray-300 text-center font-mono text-xs text-gray-500">{idx + 1}</td>
+                                                    <td class="py-2.5 px-3 border border-gray-300 font-bold text-pompier-navy">{item.nom}</td>
+                                                    <td class="py-2.5 px-3 border border-gray-300 text-xs text-gray-600">{item.famille}</td>
+                                                    <td class="py-2.5 px-3 border border-gray-300 text-xs text-gray-700 font-semibold">{item.format}</td>
+                                                    <td class="py-2.5 px-3 border border-gray-300 text-center font-extrabold text-base text-pompier-red">{orderQties[item.id]}</td>
+                                                </tr>
+                                            ))
+                                        )}
+                                    </tbody>
+                                    <tfoot>
+                                        <tr class="bg-gray-100 font-bold text-pompier-navy text-sm border-t-2 border-pompier-navy">
+                                            <td colSpan="4" class="py-2.5 px-3 text-right uppercase text-xs">Total d'unités commandées ({itemsToPrint.length} référence{itemsToPrint.length > 1 ? 's' : ''}) :</td>
+                                            <td class="py-2.5 px-3 text-center font-extrabold text-base">{totalUnits}</td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+
+                            {(orderNotes[fId] || '').trim() !== '' && (
+                                <div class="mt-6 bg-amber-50/70 border border-amber-300 rounded-lg p-3.5">
+                                    <span class="text-[10px] font-bold uppercase tracking-wider text-amber-900 block mb-1">Observations / Consignes de livraison :</span>
+                                    <p class="text-xs text-gray-800 whitespace-pre-line">{orderNotes[fId]}</p>
+                                </div>
+                            )}
+
+                            <div class="mt-8 pt-6 border-t border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-6 items-end">
+                                <div class="text-xs text-gray-500 space-y-1">
+                                    <p class="font-bold text-gray-700">Merci de nous confirmer la bonne prise en compte de ce bon de commande.</p>
+                                    <p>Pour toute question sur cette commande, veuillez contacter {AMICALE_INFO.contact} au {AMICALE_INFO.telFormat}.</p>
+                                </div>
+                                <div class="border-2 border-gray-300 rounded-xl p-4 bg-gray-50/50 text-center">
+                                    <p class="text-[11px] font-bold uppercase text-pompier-navy">Bon pour commande — Le Président</p>
+                                    <p class="text-sm font-extrabold text-gray-900 mt-1">{AMICALE_INFO.signataire}</p>
+                                    <p class="text-[11px] text-gray-500 mt-0.5">Fait à Rieumes, le {dateStr}</p>
+                                    <div class="h-10"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // VUE PRINCIPALE DE L'ONGLET COMMANDES & BONS PAR FOURNISSEUR
+            const visibleSupplierIds = supplierIds.filter(fId => {
+                if (selectedFournisseurFilter !== 'Tous' && fId !== selectedFournisseurFilter) return false;
+                if (fId === 'unassigned' && (!groupedOrders[fId] || groupedOrders[fId].length === 0)) return false;
+                return true;
+            });
+
+            return (
+                <div class="no-print space-y-6">
+                    <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                        <div>
+                            <div class="flex items-center space-x-2">
+                                <span class="bg-pompier-red text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase">Centre d'impression & Envoi PDF</span>
+                            </div>
+                            <h2 class="text-2xl font-bold text-pompier-navy mt-1">Bons de Commande par Fournisseur</h2>
+                            <p class="text-xs text-gray-500">
+                                Chaque e-mail envoyé inclut un message de présentation et le Bon de Commande officiel en fichier PDF en pièce jointe.
+                            </p>
+                        </div>
+
+                        <div class="flex items-center space-x-2 self-stretch md:self-auto">
+                            <span class="text-xs font-bold text-gray-500 uppercase shrink-0">Afficher :</span>
+                            <select 
+                                value={selectedFournisseurFilter}
+                                onChange={e => setSelectedFournisseurFilter(e.target.value)}
+                                class="border-2 border-pompier-navy rounded-lg px-3 py-2 text-xs font-bold text-pompier-navy bg-white outline-none w-full md:w-auto"
+                            >
+                                <option value="Tous">Tous les fournisseurs ({supplierIds.length})</option>
+                                {supplierIds.map(fId => {
+                                    const nom = fId === 'unassigned' ? 'Sans fournisseur associé' : (fournisseurs[fId]?.nom || 'Fournisseur');
+                                    return <option key={fId} value={fId}>{nom}</option>;
+                                })}
+                            </select>
+                        </div>
+                    </div>
+
+                    {visibleSupplierIds.length === 0 ? (
+                        <div class="bg-white p-8 rounded-xl shadow-sm border text-center text-gray-500">
+                            Aucun fournisseur enregistré. Ajoutez vos fournisseurs dans l'onglet <strong>Fournisseurs</strong>.
+                        </div>
+                    ) : (
+                        <div class="space-y-6">
+                            {visibleSupplierIds.map(fId => {
+                                const fData = fId === 'unassigned' 
+                                    ? { nom: "Articles sans fournisseur associé", numCompte: "", email: "", tel: "", siteWeb: "" } 
+                                    : (fournisseurs[fId] || { nom: "Fournisseur" });
+                                const itemsInOrder = groupedOrders[fId] || [];
+                                const activeCount = itemsInOrder.filter(i => (orderQties[i.id] || 0) > 0).length;
+
+                                const otherCatalogItems = stock.filter(item => {
+                                    const itemFId = (item.fournisseurId && fournisseurs[item.fournisseurId]) ? item.fournisseurId : 'unassigned';
+                                    return itemFId === fId && !itemsInOrder.some(o => o.id === item.id);
+                                });
+
+                                const currentRecipient = selectedRecipientBySupplier[fId] || (fData.email ? 'fournisseur' : 'tous_contacts');
+
+                                return (
+                                    <div key={fId} class="bg-white rounded-xl shadow-sm border-2 border-gray-200 overflow-hidden">
+                                        <div class="bg-pompier-navy text-white px-5 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b-4 border-pompier-red">
+                                            <div>
+                                                <div class="flex flex-wrap items-center gap-2">
+                                                    <h3 class="font-bold text-lg uppercase tracking-wide">{fData.nom}</h3>
+                                                    {fData.numCompte && (
+                                                        <span class="bg-white text-pompier-navy text-xs font-extrabold px-2.5 py-0.5 rounded shadow-sm">
+                                                            <i class="fa-solid fa-id-card mr-1 text-pompier-red"></i>N° Compte : {fData.numCompte}
+                                                        </span>
+                                                    )}
+                                                    <span class="bg-pompier-red text-white text-xs font-bold px-2.5 py-0.5 rounded-full">
+                                                        {activeCount} réf. à commander
+                                                    </span>
+                                                </div>
+                                                <p class="text-xs text-gray-300 mt-1">
+                                                    {fData.email ? `📧 ${fData.email}` : 'Pas d\'e-mail renseigné'} 
+                                                    {fData.tel ? ` · 📞 ${fData.tel}` : ''}
+                                                    {` · Bon N° ${getOrderNumber(fId)}`}
+                                                </p>
+                                            </div>
+
+                                            <div class="flex items-center space-x-2 self-stretch sm:self-auto">
+                                                <button 
+                                                    onClick={() => setPreviewSupplierId(fId)}
+                                                    class="flex-1 sm:flex-initial bg-white hover:bg-gray-100 text-pompier-navy font-bold px-3.5 py-2 rounded-lg text-xs shadow flex items-center justify-center space-x-1.5 transition"
+                                                >
+                                                    <i class="fa-solid fa-file-pdf text-pompier-red text-sm"></i>
+                                                    <span>Aperçu Bon A4 / Imprimer / PDF</span>
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <div class="p-5 space-y-4">
+                                            {itemsInOrder.length === 0 ? (
+                                                <p class="text-sm text-gray-400 italic text-center py-4 bg-gray-50 rounded-lg border border-dashed">
+                                                    Aucun article en rupture chez ce fournisseur. Vous pouvez ajouter un article manuellement ci-dessous.
+                                                </p>
+                                            ) : (
+                                                <div class="divide-y divide-gray-100 border rounded-lg overflow-hidden">
+                                                    {itemsInOrder.map(item => {
+                                                        const isAlert = item.alerteActive !== false && item.quantite <= item.seuil;
+                                                        const qty = orderQties[item.id] || 0;
+                                                        return (
+                                                            <div key={item.id} class={`p-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 ${qty > 0 ? 'bg-white' : 'bg-gray-50 opacity-60'}`}>
+                                                                <div>
+                                                                    <div class="flex items-center space-x-2">
+                                                                        <span class="font-bold text-pompier-navy">{item.nom}</span>
+                                                                        <span class="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded font-semibold">{item.format}</span>
+                                                                        {isAlert && <span class="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded uppercase">Stock : {item.quantite} (Seuil : {item.seuil})</span>}
+                                                                        {!isAlert && <span class="text-[10px] bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded">Stock : {item.quantite}</span>}
+                                                                    </div>
+                                                                </div>
+
+                                                                <div class="flex items-center space-x-2 self-end sm:self-auto">
+                                                                    <span class="text-xs text-gray-500 font-semibold mr-1">Qté à commander :</span>
+                                                                    <div class="flex items-center space-x-1 bg-gray-50 border border-gray-300 rounded-lg px-1.5 py-1">
+                                                                        <button type="button" onClick={() => adjustQty(item.id, -1)} class="w-7 h-7 flex items-center justify-center text-gray-600 hover:text-pompier-red rounded font-bold">-</button>
+                                                                        <input 
+                                                                            type="number" 
+                                                                            min="0" 
+                                                                            value={qty} 
+                                                                            onChange={e => setDirectQty(item.id, e.target.value)}
+                                                                            onFocus={e => e.target.select()}
+                                                                            class="w-12 text-center font-bold text-pompier-navy bg-transparent outline-none text-sm"
+                                                                        />
+                                                                        <button type="button" onClick={() => adjustQty(item.id, 1)} class="w-7 h-7 flex items-center justify-center text-gray-600 hover:text-emerald-600 rounded font-bold">+</button>
+                                                                    </div>
+                                                                    <button 
+                                                                        type="button" 
+                                                                        onClick={() => handleRemoveFromOrder(item.id)} 
+                                                                        class="text-gray-400 hover:text-red-500 p-1.5" 
+                                                                        title="Retirer du bon"
+                                                                    >
+                                                                        <i class="fa-solid fa-xmark"></i>
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                                                <div class="flex items-center space-x-2">
+                                                    <select 
+                                                        value={addArticleSelect[fId] || ''}
+                                                        onChange={e => setAddArticleSelect(prev => ({ ...prev, [fId]: e.target.value }))}
+                                                        class="flex-1 border rounded-lg px-3 py-2 text-xs bg-gray-50 outline-none focus:border-pompier-navy"
+                                                    >
+                                                        <option value="">+ Ajouter un autre article de ce fournisseur ({otherCatalogItems.length})...</option>
+                                                        {otherCatalogItems.map(item => (
+                                                            <option key={item.id} value={item.id}>{item.nom} ({item.format}) — En stock : {item.quantite}</option>
+                                                        ))}
+                                                    </select>
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => handleAddExtraProduct(fId)}
+                                                        disabled={!addArticleSelect[fId]}
+                                                        class={`px-3 py-2 rounded-lg text-xs font-bold shrink-0 ${addArticleSelect[fId] ? 'bg-pompier-navy text-white hover:bg-blue-900' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                                                    >
+                                                        Ajouter
+                                                    </button>
+                                                </div>
+
+                                                <div>
+                                                    <input 
+                                                        type="text" 
+                                                        placeholder="Note / consigne sur ce bon (ex: Livraison souhaitée vendredi matin...)" 
+                                                        value={orderNotes[fId] || ''}
+                                                        onChange={e => setOrderNotes(prev => ({ ...prev, [fId]: e.target.value }))}
+                                                        class="w-full border rounded-lg px-3 py-2 text-xs bg-gray-50 outline-none focus:border-pompier-navy"
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div class="pt-4 border-t border-gray-200 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+                                                <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-red-50/60 border border-red-200 p-2 rounded-xl flex-1">
+                                                    <span class="text-xs font-bold text-pompier-navy px-2 shrink-0">
+                                                        <i class="fa-solid fa-file-pdf text-pompier-red mr-1.5"></i>Envoyer Mail + PDF joint à :
+                                                    </span>
+                                                    <select 
+                                                        value={currentRecipient}
+                                                        onChange={e => setSelectedRecipientBySupplier(prev => ({ ...prev, [fId]: e.target.value }))}
+                                                        class="flex-1 bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-pompier-navy outline-none"
+                                                    >
+                                                        {fData.email && <option value="fournisseur">🏢 Fournisseur : {fData.nom} ({fData.email})</option>}
+                                                        <option value="tous_contacts">🔔 Tous les contacts d'alerte actifs</option>
+                                                        {Object.entries(contactsAlerte).map(([cId, c]) => (
+                                                            <option key={cId} value={`contact:${cId}`}>👤 Contact : {c.nom} ({c.email})</option>
+                                                        ))}
+                                                    </select>
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => handleSendPurchaseOrderEmail(fId, currentRecipient)}
+                                                        disabled={activeCount === 0}
+                                                        class={`px-4 py-2 rounded-lg text-xs font-bold shadow-sm flex items-center justify-center space-x-1.5 shrink-0 transition ${activeCount > 0 ? 'bg-pompier-red hover:bg-red-700 text-white' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
+                                                    >
+                                                        <i class="fa-solid fa-paper-plane"></i>
+                                                        <span>Envoyer Mail + PDF</span>
+                                                    </button>
+                                                </div>
+
+                                                <div class="flex flex-wrap items-center gap-2">
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => setPreviewSupplierId(fId)}
+                                                        disabled={activeCount === 0}
+                                                        class={`px-3.5 py-2 rounded-lg text-xs font-bold shadow-sm flex items-center space-x-1.5 ${activeCount > 0 ? 'bg-pompier-navy hover:bg-blue-900 text-white' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                                                    >
+                                                        <i class="fa-solid fa-print"></i>
+                                                        <span>Imprimer / PDF</span>
+                                                    </button>
+
+                                                    {fId !== 'unassigned' && fData.tel && (
+                                                        <button 
+                                                            type="button"
+                                                            onClick={() => handleSMS(fId, itemsInOrder)}
+                                                            disabled={activeCount === 0}
+                                                            class={`px-3.5 py-2 rounded-lg text-xs font-bold shadow-sm flex items-center space-x-1.5 ${activeCount > 0 ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                                                        >
+                                                            <i class="fa-solid fa-comment-sms"></i>
+                                                            <span>SMS</span>
+                                                        </button>
+                                                    )}
+
+                                                    {fId !== 'unassigned' && fData.siteWeb && (
+                                                        <a 
+                                                            href={fData.siteWeb.startsWith('http') ? fData.siteWeb : `https://${fData.siteWeb}`} 
+                                                            target="_blank" 
+                                                            rel="noopener noreferrer" 
+                                                            class="px-3.5 py-2 rounded-lg text-xs font-bold shadow-sm bg-gray-700 hover:bg-gray-800 text-white flex items-center space-x-1.5"
+                                                        >
+                                                            <i class="fa-solid fa-globe"></i>
+                                                            <span>Site web</span>
+                                                        </a>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
             );
         }
@@ -1034,7 +1913,6 @@
                         onUpdateQty(id, ancienStock, -qty);
                         articlesSortis.push({ id, nom: item.nom, quantite: qty, format: item.format });
 
-                        // Ignorer les articles dont l'alerte est en pause
                         if (item.alerteActive !== false && nouveauStock <= item.seuil) {
                             if (ancienStock > item.seuil) {
                                 nouveauxIds.push(item.id);
@@ -1054,7 +1932,6 @@
                 });
 
                 if (nouveauxIds.length > 0) {
-                    // Exclure également du récapitulatif les autres articles qui ont leur alerte en pause
                     const autresEnAlerte = catalog.filter(i => i.alerteActive !== false && i.quantite <= i.seuil && !cart[i.id]);
                     const tousLesAlerte = [...itemsEnAlerteActuels, ...autresEnAlerte];
                     triggerEmailAlerts(utilisateur.trim(), tousLesAlerte, nouveauxIds, false);
@@ -1068,7 +1945,7 @@
             const catalogForCart = fullStock || stock;
 
             return (
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="no-print grid grid-cols-1 lg:grid-cols-3 gap-6">
                     <div class="lg:col-span-2 space-y-4">
                         <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
                             <div class="flex justify-between items-center mb-4">
@@ -1219,7 +2096,7 @@
             };
 
             return (
-                <div class="max-w-3xl mx-auto relative">
+                <div class="no-print max-w-3xl mx-auto relative">
                     <div class="flex justify-between items-center mb-6">
                         <h2 class="text-2xl font-bold text-pompier-navy">Journal des mouvements</h2>
                         {logs.length > 0 && isSuperAdmin && (
@@ -1353,7 +2230,7 @@
             };
 
             return (
-                <div class="max-w-4xl mx-auto space-y-8">
+                <div class="no-print max-w-4xl mx-auto space-y-8">
                     <div class="mb-6">
                         <h2 class="text-2xl font-bold text-pompier-navy">Sécurité & Gestion des Alertes</h2>
                         <p class="text-sm text-gray-500 mt-1">
@@ -1470,109 +2347,6 @@
                                 </div>
                             </div>
                         )}
-                    </div>
-                </div>
-            );
-        }
-
-        function OrderModal({ onClose, stock, fournisseurs }) {
-            const [orderQties, setOrderQties] = useState({});
-            // Exclure de la préparation de commande les articles dont l'alerte est en pause
-            const toOrder = stock.filter(item => item.alerteActive !== false && item.quantite <= item.seuil);
-            
-            useEffect(() => {
-                const initial = {};
-                toOrder.forEach(item => { initial[item.id] = (item.seuil - item.quantite) + 2; });
-                setOrderQties(initial);
-            }, []);
-
-            const adjustQty = (id, amount) => { setOrderQties(prev => ({ ...prev, [id]: Math.max(0, (prev[id] || 0) + amount) })); };
-
-            const groupedOrders = {};
-            toOrder.forEach(item => {
-                const fId = item.fournisseurId || 'unassigned';
-                if (!groupedOrders[fId]) groupedOrders[fId] = [];
-                groupedOrders[fId].push(item);
-            });
-
-            const generateText = (items) => {
-                let lines = [];
-                items.forEach(item => {
-                    if (orderQties[item.id] > 0) lines.push(`- ${orderQties[item.id]}x ${item.nom} (${item.format})`);
-                });
-                return lines.join('\n');
-            };
-
-            const handleEmail = (fId, items) => {
-                const fData = fournisseurs[fId];
-                if (!fData || !fData.email) return alert("Adresse e-mail non renseignée.");
-                const list = generateText(items);
-                if (!list) return alert("Aucune quantité sélectionnée.");
-                const body = `Bonjour,\n\nVoici notre commande pour l'Amicale des Sapeurs-Pompiers de Rieumes :\n\n${list}\n\nMerci de nous confirmer.\n\nCordialement,\nLe Bureau de l'Amicale`;
-                window.location.href = `mailto:${fData.email}?subject=Commande Amicale SP Rieumes&body=${encodeURIComponent(body)}`;
-            };
-
-            const handleSMS = (fId, items) => {
-                const fData = fournisseurs[fId];
-                if (!fData || !fData.tel) return alert("Numéro non renseigné.");
-                const list = generateText(items);
-                if (!list) return alert("Aucune quantité sélectionnée.");
-                const body = `Commande Amicale SP Rieumes :\n${list}\n\nMerci !`;
-                window.location.href = `sms:${fData.tel.replace(/\s+/g, '')}?body=${encodeURIComponent(body)}`;
-            };
-
-            return (
-                <div class="fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
-                    <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col">
-                        <div class="bg-pompier-red text-white px-6 py-4 flex justify-between items-center shrink-0">
-                            <h2 class="text-xl font-bold"><i class="fa-solid fa-paper-plane mr-2"></i> Préparation des commandes</h2>
-                            <button onClick={onClose} class="text-white hover:text-gray-200"><i class="fa-solid fa-times text-xl"></i></button>
-                        </div>
-                        <div class="p-6 overflow-y-auto">
-                            {toOrder.length === 0 ? (
-                                <p class="text-center text-gray-500 py-8 font-bold">Aucun produit actif en rupture, tout est au vert !</p>
-                            ) : (
-                                Object.keys(groupedOrders).map(fId => {
-                                    const items = groupedOrders[fId];
-                                    const fData = fId === 'unassigned' ? { nom: "Sans Fournisseur Associé" } : fournisseurs[fId];
-                                    
-                                    return (
-                                        <div key={fId} class="bg-gray-50 p-4 rounded-lg mb-6 border border-gray-200 shadow-sm">
-                                            <h3 class="font-bold text-pompier-navy mb-4 text-lg border-b pb-2">{fData.nom}</h3>
-                                            
-                                            {items.map(item => (
-                                                <div key={item.id} class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0">
-                                                    <div class="flex flex-col">
-                                                        <span class="font-semibold text-gray-800">{item.nom}</span>
-                                                        <div class="flex items-center space-x-2 text-xs">
-                                                            <span class="bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded">{item.format}</span>
-                                                            <span class="text-red-500">Stock actuel : {item.quantite}</span>
-                                                        </div>
-                                                    </div>
-                                                    <div class="flex items-center space-x-2 bg-white rounded border px-2 py-1 shadow-sm">
-                                                        <button onClick={() => adjustQty(item.id, -1)} class="w-6 h-6 text-gray-600 hover:text-pompier-red"><i class="fa-solid fa-minus text-xs"></i></button>
-                                                        <span class="w-8 text-center font-bold text-pompier-navy">{orderQties[item.id] || 0}</span>
-                                                        <button onClick={() => adjustQty(item.id, 1)} class="w-6 h-6 text-gray-600 hover:text-green-600"><i class="fa-solid fa-plus text-xs"></i></button>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                            
-                                            {fId !== 'unassigned' && (
-                                                <div class="mt-4 pt-4 border-t border-gray-200 flex flex-col sm:flex-row gap-2">
-                                                    <button onClick={() => handleEmail(fId, items)} class={`flex-1 py-2 rounded font-bold shadow flex justify-center items-center text-sm ${fData.email ? 'bg-pompier-red text-white hover:bg-red-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}><i class="fa-solid fa-envelope mr-2"></i> E-mail</button>
-                                                    <button onClick={() => handleSMS(fId, items)} class={`flex-1 py-2 rounded font-bold shadow flex justify-center items-center text-sm ${fData.tel ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}><i class="fa-solid fa-mobile-screen-button mr-2"></i> SMS</button>
-                                                    {fData.siteWeb && (
-                                                        <a href={fData.siteWeb.startsWith('http') ? fData.siteWeb : `https://${fData.siteWeb}`} target="_blank" rel="noopener noreferrer" class="flex-1 py-2 rounded font-bold shadow flex justify-center items-center text-sm bg-pompier-navy text-white hover:bg-blue-900 transition-colors">
-                                                            <i class="fa-solid fa-globe mr-2"></i> Site web
-                                                        </a>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </div>
-                                    )
-                                })
-                            )}
-                        </div>
                     </div>
                 </div>
             );
