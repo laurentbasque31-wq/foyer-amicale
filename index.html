@@ -126,6 +126,27 @@
             return '🏷️';
         }
 
+        // Devine automatiquement le nombre d'unités dans un pack à partir de son libellé (ex: "Pack de 6" -> 6, "Pack 24x33cl" -> 24)
+        function guessMultiplierFromLabel(label) {
+            const str = String(label || '').toLowerCase();
+            if (str.includes('unité') || str.includes('unite') || str.includes('canette') || str.includes('bouteille seule')) return 1;
+            const matchPack = str.match(/(?:pack|carton|lot|boîte|boite|fardeau|caisse)\s*(?:de\s*)?(\d+)/i);
+            if (matchPack && parseInt(matchPack[1], 10) > 0) return parseInt(matchPack[1], 10);
+            const matchX = str.match(/(\d+)\s*x/i);
+            if (matchX && parseInt(matchX[1], 10) > 0) return parseInt(matchX[1], 10);
+            const matchNum = str.match(/\b(4|6|8|10|12|15|18|20|24|30|36)\b/);
+            if (matchNum) return parseInt(matchNum[1], 10);
+            return 1;
+        }
+
+        // Récupère le multiplicateur effectif d'une entrée EAN (même si enregistrée avant cette mise à jour)
+        function getEffectiveMultiplier(eanEntry) {
+            if (!eanEntry) return 1;
+            const explicit = Number(eanEntry.multiplier);
+            if (!isNaN(explicit) && explicit >= 1) return explicit;
+            return guessMultiplierFromLabel(eanEntry.label);
+        }
+
         // Configuration Firebase
         const firebaseConfig = {
             apiKey: "AIzaSyCMcdctGoLFbIjn7Nx5JPsjI5UoRNcQd0I",
@@ -228,7 +249,6 @@
                     );
                     isRunningRef.current = true;
                 } catch (err) {
-                    // Si le mode "environment" échoue sur une webcam PC, on relance en mode caméra standard ("user")
                     if (typeof camIdOrConfig === 'object' && camIdOrConfig.facingMode === 'environment') {
                         try {
                             await html5QrCode.start(
@@ -268,7 +288,6 @@
                     window.Html5Qrcode.getCameras().then(devices => {
                         if (devices && devices.length > 0) {
                             setCameras(devices);
-                            // Priorité à la caméra arrière sur mobile, sinon 1ère caméra dispo (webcam PC)
                             const backCam = devices.find(d => /back|arrière|rear|environment/i.test(d.label));
                             const chosenId = backCam ? backCam.id : devices[devices.length - 1].id;
                             setSelectedCamId(chosenId);
@@ -407,18 +426,21 @@
             const [editingProduct, setEditingProduct] = useState(null);
             const [newEanCodeInput, setNewEanCodeInput] = useState('');
             const [newEanLabelInput, setNewEanLabelInput] = useState('Pack de 24');
+            const [newEanMultiplierInput, setNewEanMultiplierInput] = useState(24);
             const [showProductEanScanner, setShowProductEanScanner] = useState(false);
 
             const [showRestockModal, setShowRestockModal] = useState(false);
             const [restockItem, setRestockItem] = useState(null);
             const [restockScannedLabel, setRestockScannedLabel] = useState('');
-            const [restockQty, setRestockQty] = useState('');
+            const [restockMultiplier, setRestockMultiplier] = useState(1);
+            const [restockQty, setRestockQty] = useState('1');
 
             // Scanner d'entrée de stock dans l'onglet Stocks
             const [showStockEntryScanner, setShowStockEntryScanner] = useState(false);
             const [unknownEanModalCode, setUnknownEanModalCode] = useState(null);
             const [associateProductId, setAssociateProductId] = useState('');
             const [associateLabel, setAssociateLabel] = useState('Pack de 24');
+            const [associateMultiplier, setAssociateMultiplier] = useState(24);
 
             const [showManageFamillesModal, setShowManageFamillesModal] = useState(false);
             const [newFamilleInput, setNewFamilleInput] = useState('');
@@ -508,7 +530,10 @@
                 famille: data.famille || (famillesList[0] ? famillesList[0].nom : 'Boissons'),
                 popularite: popularityMap[id] || 0,
                 alerteActive: data.alerteActive !== false,
-                codesEan: Array.isArray(data.codesEan) ? data.codesEan : [],
+                codesEan: Array.isArray(data.codesEan) ? data.codesEan.map(e => ({
+                    ...e,
+                    multiplier: getEffectiveMultiplier(e)
+                })) : [],
                 ...data
             }));
 
@@ -520,7 +545,13 @@
                     if (Array.isArray(item.codesEan)) {
                         const match = item.codesEan.find(entry => String(entry.code).trim() === clean);
                         if (match) {
-                            return { item, eanEntry: match };
+                            return { 
+                                item, 
+                                eanEntry: {
+                                    ...match,
+                                    multiplier: getEffectiveMultiplier(match)
+                                } 
+                            };
                         }
                     }
                 }
@@ -753,13 +784,13 @@
 
             const handleOpenAddModal = (prefillEan = '') => {
                 const defaultFam = famillesList.length > 0 ? famillesList[0].nom : 'Boissons';
-                const initialEans = prefillEan ? [{ code: prefillEan, label: 'Pack de 24', isOrderCode: true }] : [];
+                const initialEans = prefillEan ? [{ code: prefillEan, label: 'Pack de 24', multiplier: 24, isOrderCode: true }] : [];
                 setEditingProduct({ 
                     id: null, 
                     nom: '', 
                     famille: defaultFam, 
-                    format: 'Pack 24x33cl', 
-                    seuil: 5, 
+                    format: 'Canette 33cl', 
+                    seuil: 24, 
                     quantite: 0, 
                     fournisseurId: '', 
                     alerteActive: true,
@@ -767,6 +798,7 @@
                 });
                 setNewEanCodeInput('');
                 setNewEanLabelInput('Pack de 24');
+                setNewEanMultiplierInput(24);
                 setShowProductModal(true);
             };
 
@@ -774,17 +806,22 @@
                 setEditingProduct({ 
                     ...item, 
                     alerteActive: item.alerteActive !== false,
-                    codesEan: Array.isArray(item.codesEan) ? [...item.codesEan] : []
+                    codesEan: Array.isArray(item.codesEan) ? item.codesEan.map(e => ({
+                        ...e,
+                        multiplier: getEffectiveMultiplier(e)
+                    })) : []
                 });
                 setNewEanCodeInput('');
                 setNewEanLabelInput('Pack de 24');
+                setNewEanMultiplierInput(24);
                 setShowProductModal(true);
             };
 
-            // Ajout d'un code EAN dans la fiche produit en cours d'édition
-            const handleAddEanToProduct = (codeVal, labelVal) => {
+            // Ajout d'un code EAN avec son multiplicateur d'unités dans la fiche produit
+            const handleAddEanToProduct = (codeVal, labelVal, multVal) => {
                 const cleanCode = String(codeVal || '').trim();
                 const cleanLabel = String(labelVal || '').trim() || 'Conditionnement standard';
+                const cleanMult = Math.max(1, parseInt(multVal, 10) || guessMultiplierFromLabel(cleanLabel));
                 if (!cleanCode) return;
 
                 if (editingProduct.codesEan.some(e => e.code === cleanCode)) {
@@ -805,7 +842,7 @@
                 const isFirst = editingProduct.codesEan.length === 0;
                 setEditingProduct(prev => ({
                     ...prev,
-                    codesEan: [...prev.codesEan, { code: cleanCode, label: cleanLabel, isOrderCode: isFirst }]
+                    codesEan: [...prev.codesEan, { code: cleanCode, label: cleanLabel, multiplier: cleanMult, isOrderCode: isFirst }]
                 }));
                 setNewEanCodeInput('');
             };
@@ -818,9 +855,18 @@
             };
 
             const handleUpdateEanLabel = (codeToEdit, updatedLabel) => {
+                const guessed = guessMultiplierFromLabel(updatedLabel);
                 setEditingProduct(prev => ({
                     ...prev,
-                    codesEan: prev.codesEan.map(e => e.code === codeToEdit ? { ...e, label: updatedLabel } : e)
+                    codesEan: prev.codesEan.map(e => e.code === codeToEdit ? { ...e, label: updatedLabel, multiplier: guessed } : e)
+                }));
+            };
+
+            const handleUpdateEanMultiplier = (codeToEdit, updatedMult) => {
+                const parsed = updatedMult === '' ? '' : Math.max(1, parseInt(updatedMult, 10) || 1);
+                setEditingProduct(prev => ({
+                    ...prev,
+                    codesEan: prev.codesEan.map(e => e.code === codeToEdit ? { ...e, multiplier: parsed } : e)
                 }));
             };
 
@@ -843,11 +889,16 @@
                     seuil: Number(editingProduct.seuil) || 0,
                     fournisseurId: editingProduct.fournisseurId || '',
                     alerteActive: editingProduct.alerteActive !== false,
-                    codesEan: (editingProduct.codesEan || []).map(c => ({
-                        code: String(c.code).trim(),
-                        label: String(c.label || '').trim() || 'Conditionnement standard',
-                        isOrderCode: Boolean(c.isOrderCode)
-                    }))
+                    codesEan: (editingProduct.codesEan || []).map(c => {
+                        const cleanLabel = String(c.label || '').trim() || 'Conditionnement standard';
+                        const cleanMult = Math.max(1, parseInt(c.multiplier, 10) || guessMultiplierFromLabel(cleanLabel));
+                        return {
+                            code: String(c.code).trim(),
+                            label: cleanLabel,
+                            multiplier: cleanMult,
+                            isOrderCode: Boolean(c.isOrderCode)
+                        };
+                    })
                 };
 
                 if (editingProduct.id) {
@@ -868,23 +919,30 @@
                 if (newQty >= 0) db.ref(`stock/${id}`).update({ quantite: newQty });
             };
 
-            const handleOpenRestock = (item, scannedLabel = '') => {
+            const handleOpenRestock = (item, scannedEanEntry = null) => {
                 setRestockItem(item);
-                setRestockScannedLabel(scannedLabel);
-                setRestockQty('');
+                if (scannedEanEntry) {
+                    const mult = getEffectiveMultiplier(scannedEanEntry);
+                    setRestockScannedLabel(scannedEanEntry.label || 'Code scanné');
+                    setRestockMultiplier(mult);
+                } else {
+                    setRestockScannedLabel('');
+                    setRestockMultiplier(1);
+                }
+                setRestockQty('1');
                 setShowRestockModal(true);
             };
 
-            // Résultat du scan caméra dans l'onglet Stocks (Entrée de stock ou association)
             const handleStockTabScanDetected = (code) => {
                 setShowStockEntryScanner(false);
                 const found = findProductByEan(code);
                 if (found) {
-                    handleOpenRestock(found.item, found.eanEntry.label);
+                    handleOpenRestock(found.item, found.eanEntry);
                 } else {
                     setUnknownEanModalCode(code);
                     setAssociateProductId(stockArray.length > 0 ? stockArray[0].id : '');
                     setAssociateLabel('Pack de 24');
+                    setAssociateMultiplier(24);
                 }
             };
 
@@ -895,34 +953,41 @@
                 if (!targetItem) return;
 
                 const existing = Array.isArray(targetItem.codesEan) ? targetItem.codesEan : [];
+                const cleanLabel = associateLabel.trim() || 'Conditionnement standard';
+                const cleanMult = Math.max(1, parseInt(associateMultiplier, 10) || guessMultiplierFromLabel(cleanLabel));
                 const updatedList = [
                     ...existing,
-                    { code: unknownEanModalCode, label: associateLabel.trim() || 'Conditionnement standard', isOrderCode: existing.length === 0 }
+                    { code: unknownEanModalCode, label: cleanLabel, multiplier: cleanMult, isOrderCode: existing.length === 0 }
                 ];
                 db.ref(`stock/${targetItem.id}`).update({ codesEan: updatedList });
                 const codeSaved = unknownEanModalCode;
-                const labelSaved = associateLabel.trim() || 'Conditionnement standard';
                 setUnknownEanModalCode(null);
-                alert(`✅ Code-barres ${codeSaved} (${labelSaved}) associé à "${targetItem.nom}" !`);
+                alert(`✅ Code-barres ${codeSaved} (${cleanLabel} = x${cleanMult} unités) associé à "${targetItem.nom}" !`);
             };
 
             const handleConfirmRestock = (e) => {
                 e.preventDefault();
-                const addQty = parseInt(restockQty, 10);
+                const packCount = parseInt(restockQty, 10);
+                const mult = Math.max(1, parseInt(restockMultiplier, 10) || 1);
+                const totalUnitsToAdd = packCount * mult;
                 const nomValide = utilisateur.trim();
                 
                 if (!nomValide) return alert("🚨 Merci d'indiquer ton nom ou surnom avant de valider l'entrée.");
 
-                if (!isNaN(addQty) && addQty > 0 && restockItem) {
+                if (!isNaN(packCount) && packCount > 0 && restockItem) {
                     localStorage.setItem('foyer_utilisateur', nomValide);
-                    const newTotal = (restockItem.quantite || 0) + addQty;
+                    const newTotal = (restockItem.quantite || 0) + totalUnitsToAdd;
                     db.ref(`stock/${restockItem.id}`).update({ quantite: newTotal });
                     
+                    const formatTrace = mult > 1 
+                        ? `${restockItem.format} (${packCount}× ${restockScannedLabel || `Pack de ${mult}`})`
+                        : restockItem.format;
+
                     db.ref('historique').push({
                         date: firebase.database.ServerValue.TIMESTAMP,
                         type: 'entree',
                         utilisateur: nomValide,
-                        articles: [{ id: restockItem.id, nom: restockItem.nom, quantite: addQty, format: restockItem.format }]
+                        articles: [{ id: restockItem.id, nom: restockItem.nom, quantite: totalUnitsToAdd, format: formatTrace }]
                     });
 
                     setShowRestockModal(false);
@@ -944,12 +1009,10 @@
                 setNewFamilleInput('');
             };
 
-            // Mettre à jour l'icône / emoji d'une famille existante
             const handleUpdateFamilleIcon = (id, newIcon) => {
                 db.ref(`familles/${id}`).update({ icon: newIcon });
             };
 
-            // Déplacer une famille vers le haut ou vers le bas (réorganisation des boutons)
             const handleMoveFamille = (index, direction) => {
                 const targetIndex = index + direction;
                 if (targetIndex < 0 || targetIndex >= famillesList.length) return;
@@ -1070,7 +1133,6 @@
                     <main class="max-w-6xl mx-auto px-4 py-5">
                         {(activeTab === 'sorties' || (activeTab === 'stock' && isAdmin)) && (
                             <div class="no-print mb-5 space-y-3">
-                                {/* Barre de recherche + Bouton Tri + Sélecteur Vue (Liste / Grille) */}
                                 <div class="flex flex-col sm:flex-row gap-2.5">
                                     <div class="relative flex-1">
                                         <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"></i>
@@ -1097,7 +1159,6 @@
                                             <span>{sortByPopularity ? 'Plus sortis' : 'Tri A-Z'}</span>
                                         </button>
 
-                                        {/* BASCULE VUE LISTE COMPACTE / GRILLE 2 COLONNES */}
                                         <div class="bg-white border border-gray-300 rounded-xl p-1 flex items-center shadow-sm shrink-0">
                                             <button 
                                                 type="button"
@@ -1183,6 +1244,7 @@
                                     setUnknownEanModalCode(code);
                                     setAssociateProductId(stockArray.length > 0 ? stockArray[0].id : '');
                                     setAssociateLabel('Pack de 24');
+                                    setAssociateMultiplier(24);
                                 }}
                             />
                         )}
@@ -1192,7 +1254,7 @@
                                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-5">
                                     <div>
                                         <h2 class="text-2xl font-bold text-pompier-navy">Inventaire de la Réserve</h2>
-                                        <p class="text-xs text-gray-500">Gérez les fiches produits, associez plusieurs codes EAN ou scannez une livraison.</p>
+                                        <p class="text-xs text-gray-500">Gérez les fiches produits, associez vos codes EAN (packs / unités) ou scannez une livraison.</p>
                                     </div>
                                     <div class="flex flex-wrap items-center gap-2">
                                         {!inventoryMode ? (
@@ -1245,7 +1307,6 @@
                                     </div>
                                 )}
 
-                                {/* AFFICHAGE DES STOCKS SELON LE MODE CHOISI (LISTE COMPACTE OU GRILLE 2 COLONNES SUR MOBILE) */}
                                 {viewMode === 'list' ? (
                                     <div class="bg-white rounded-xl shadow-sm border border-gray-200 divide-y divide-gray-200 overflow-hidden">
                                         {filteredStock.map(item => {
@@ -1275,7 +1336,7 @@
                                                                 <span class="text-[9px] text-gray-500 uppercase block leading-none">Stock</span>
                                                                 <span class={`font-extrabold text-base leading-tight ${isAlert ? 'text-red-600' : 'text-pompier-navy'}`}>{item.quantite}</span>
                                                             </div>
-                                                            <button onClick={() => handleOpenRestock(item, '')} class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-2.5 py-2 rounded-lg font-bold shadow-sm" title="Entrée de stock">
+                                                            <button onClick={() => handleOpenRestock(item, null)} class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-2.5 py-2 rounded-lg font-bold shadow-sm" title="Entrée de stock">
                                                                 + Entrée
                                                             </button>
                                                             <button onClick={() => handleOpenEditModal(item)} class="p-2 text-gray-400 hover:text-blue-600" title="Modifier"><i class="fa-solid fa-pen-to-square"></i></button>
@@ -1339,7 +1400,7 @@
                                                     <div class="mt-3 pt-2 border-t border-gray-200 flex items-center justify-between">
                                                         {!inventoryMode ? (
                                                             <>
-                                                                <button onClick={() => handleOpenRestock(item, '')} class="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] px-2.5 py-1.5 rounded-lg font-bold shadow-sm">
+                                                                <button onClick={() => handleOpenRestock(item, null)} class="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] px-2.5 py-1.5 rounded-lg font-bold shadow-sm">
                                                                     + Entrée
                                                                 </button>
                                                                 <div class="text-right">
@@ -1380,7 +1441,6 @@
 
                         {activeTab === 'fournisseurs' && isAdmin && (
                             <div class="no-print">
-                                {/* Carte Coordonnées Figées de l'Amicale */}
                                 <div class="bg-blue-50 border-l-4 border-pompier-navy p-4 rounded-xl shadow-sm mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                                     <div class="space-y-1">
                                         <div class="flex items-center space-x-2">
@@ -1498,7 +1558,7 @@
                         </div>
                     )}
 
-                    {/* MODALE CRÉATION / MODIFICATION PRODUIT AVEC MULTI-CODES EAN */}
+                    {/* MODALE CRÉATION / MODIFICATION PRODUIT AVEC MULTI-CODES EAN ET CONTENANCE (MULTIPLICATEUR) */}
                     {showProductModal && editingProduct && isAdmin && (
                         <div class="no-print fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50 overflow-y-auto">
                             <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full overflow-hidden my-4">
@@ -1519,18 +1579,18 @@
                                             </select>
                                         </div>
                                         <div class="flex-1">
-                                            <label class="block text-sm font-bold mb-1">Unité gérée en stock *</label>
-                                            <input required type="text" placeholder="Ex: Pack 24x33cl" value={editingProduct.format} onChange={e => setEditingProduct({...editingProduct, format: e.target.value})} class="w-full border rounded-lg p-2 outline-none focus:border-pompier-navy" />
+                                            <label class="block text-sm font-bold mb-1">Unité comptée en stock *</label>
+                                            <input required type="text" placeholder="Ex: Canette 33cl, Bouteille..." value={editingProduct.format} onChange={e => setEditingProduct({...editingProduct, format: e.target.value})} class="w-full border rounded-lg p-2 outline-none focus:border-pompier-navy" />
                                         </div>
                                     </div>
                                     <div class="flex space-x-3">
                                         <div class="flex-1">
-                                            <label class="block text-sm font-bold mb-1">Seuil d'alerte</label>
+                                            <label class="block text-sm font-bold mb-1">Seuil d'alerte (en unités)</label>
                                             <input required type="number" min="0" value={editingProduct.seuil} onChange={e => setEditingProduct({...editingProduct, seuil: e.target.value})} class="w-full border rounded-lg p-2 outline-none focus:border-pompier-navy" />
                                         </div>
                                         {!editingProduct.id && (
                                             <div class="flex-1">
-                                                <label class="block text-sm font-bold mb-1">Stock initial</label>
+                                                <label class="block text-sm font-bold mb-1">Stock initial (en unités)</label>
                                                 <input required type="number" min="0" value={editingProduct.quantite} onChange={e => setEditingProduct({...editingProduct, quantite: e.target.value})} class="w-full border rounded-lg p-2 outline-none focus:border-pompier-navy" />
                                             </div>
                                         )}
@@ -1543,45 +1603,62 @@
                                         </select>
                                     </div>
 
-                                    {/* SECTION MULTI-CODES BARRES EAN */}
+                                    {/* SECTION MULTI-CODES BARRES EAN AVEC MULTIPLICATEUR PAR PACK */}
                                     <div class="bg-blue-50/70 border border-blue-200 rounded-xl p-3.5 space-y-3">
                                         <div class="flex justify-between items-center">
-                                            <span class="text-xs font-extrabold uppercase text-pompier-navy">
-                                                <i class="fa-solid fa-barcode text-pompier-red mr-1.5"></i>Codes-barres EAN associés ({editingProduct.codesEan.length})
-                                            </span>
+                                            <div>
+                                                <span class="text-xs font-extrabold uppercase text-pompier-navy block">
+                                                    <i class="fa-solid fa-barcode text-pompier-red mr-1.5"></i>Codes-barres EAN ({editingProduct.codesEan.length})
+                                                </span>
+                                                <span class="text-[10px] text-gray-500">Indique combien d'unités contient chaque pack pour les entrées de stock</span>
+                                            </div>
                                             <button 
                                                 type="button" 
                                                 onClick={() => setShowProductEanScanner(true)}
-                                                class="bg-pompier-navy hover:bg-blue-900 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm flex items-center space-x-1.5"
+                                                class="bg-pompier-navy hover:bg-blue-900 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm flex items-center space-x-1.5 shrink-0"
                                             >
                                                 <i class="fa-solid fa-camera"></i>
-                                                <span>Scanner un code</span>
+                                                <span>Scanner</span>
                                             </button>
                                         </div>
 
                                         {editingProduct.codesEan.length > 0 ? (
                                             <div class="space-y-1.5">
                                                 {editingProduct.codesEan.map((entry) => (
-                                                    <div key={entry.code} class="bg-white border border-blue-200 rounded-lg px-2.5 py-2 flex items-center justify-between gap-2 text-xs">
+                                                    <div key={entry.code} class="bg-white border border-blue-200 rounded-lg p-2 flex items-center justify-between gap-2 text-xs">
                                                         <div class="min-w-0 flex-1">
                                                             <input 
                                                                 type="text"
                                                                 list="ean-labels-suggestions"
                                                                 value={entry.label}
                                                                 onChange={e => handleUpdateEanLabel(entry.code, e.target.value)}
-                                                                class="font-bold text-pompier-navy bg-gray-50 border border-transparent hover:border-gray-300 focus:border-pompier-navy focus:bg-white rounded px-1.5 py-0.5 w-full outline-none"
-                                                                title="Cliquer pour modifier le libellé de ce conditionnement"
+                                                                class="font-bold text-pompier-navy bg-gray-50 border border-gray-200 focus:border-pompier-navy focus:bg-white rounded px-1.5 py-0.5 w-full outline-none"
+                                                                title="Libellé du conditionnement (ex: Pack de 6, Pack de 24, Unité)"
                                                             />
-                                                            <div class="font-mono text-gray-500 text-[11px] px-1.5 mt-0.5">{entry.code}</div>
+                                                            <div class="font-mono text-gray-400 text-[10px] px-1 mt-0.5">{entry.code}</div>
                                                         </div>
-                                                        <div class="flex items-center space-x-1.5 shrink-0">
+
+                                                        <div class="flex items-center space-x-1 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1 shrink-0" title="Nombre d'unités ajoutées au stock quand on rentre 1 pack de ce code">
+                                                            <span class="text-[10px] font-bold text-emerald-800">×</span>
+                                                            <input 
+                                                                type="number" 
+                                                                min="1"
+                                                                value={entry.multiplier !== undefined ? entry.multiplier : 1}
+                                                                onChange={e => handleUpdateEanMultiplier(entry.code, e.target.value)}
+                                                                onFocus={e => e.target.select()}
+                                                                class="w-10 text-center font-extrabold text-emerald-900 bg-transparent outline-none text-xs"
+                                                            />
+                                                            <span class="text-[9px] text-emerald-700 font-semibold">u.</span>
+                                                        </div>
+
+                                                        <div class="flex items-center space-x-1 shrink-0">
                                                             <button 
                                                                 type="button"
                                                                 onClick={() => handleSetOrderEan(entry.code)}
                                                                 class={`px-2 py-1 rounded text-[10px] font-bold border transition ${entry.isOrderCode ? 'bg-amber-100 border-amber-400 text-amber-900' : 'bg-gray-50 border-gray-200 text-gray-400 hover:text-gray-600'}`}
-                                                                title="Utiliser ce code EAN sur les Bons de Commande"
+                                                                title="Afficher ce code EAN sur les Bons de Commande"
                                                             >
-                                                                <i class="fa-solid fa-star mr-1"></i>{entry.isOrderCode ? 'Bon Cmd' : 'Principal'}
+                                                                <i class="fa-solid fa-star"></i>
                                                             </button>
                                                             <button 
                                                                 type="button"
@@ -1599,35 +1676,49 @@
                                             <p class="text-[11px] text-gray-500 italic">Aucun code-barres enregistré. Scanne ou ajoute un code ci-dessous.</p>
                                         )}
 
-                                        <div class="pt-2 border-t border-blue-200/80 grid grid-cols-1 sm:grid-cols-5 gap-2">
+                                        <div class="pt-2 border-t border-blue-200/80 grid grid-cols-1 sm:grid-cols-12 gap-2">
                                             <input 
                                                 type="text" 
                                                 inputMode="numeric"
                                                 placeholder="N° EAN-13..." 
                                                 value={newEanCodeInput}
                                                 onChange={e => setNewEanCodeInput(e.target.value)}
-                                                class="sm:col-span-2 bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none focus:border-pompier-navy"
+                                                class="sm:col-span-4 bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none focus:border-pompier-navy"
                                             />
                                             <input 
                                                 type="text" 
                                                 list="ean-labels-suggestions"
-                                                placeholder="Ex: Pack de 24, Unité..." 
+                                                placeholder="Ex: Pack de 6..." 
                                                 value={newEanLabelInput}
-                                                onChange={e => setNewEanLabelInput(e.target.value)}
-                                                class="sm:col-span-2 bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-pompier-navy"
+                                                onChange={e => {
+                                                    const val = e.target.value;
+                                                    setNewEanLabelInput(val);
+                                                    setNewEanMultiplierInput(guessMultiplierFromLabel(val));
+                                                }}
+                                                class="sm:col-span-4 bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-pompier-navy"
                                             />
+                                            <div class="sm:col-span-2 flex items-center bg-white border border-gray-300 rounded-lg px-2 py-1" title="Nombre d'unités dans ce conditionnement">
+                                                <span class="text-[10px] text-gray-400 font-bold mr-1">×</span>
+                                                <input 
+                                                    type="number" 
+                                                    min="1"
+                                                    value={newEanMultiplierInput}
+                                                    onChange={e => setNewEanMultiplierInput(e.target.value)}
+                                                    class="w-full text-center font-bold text-xs text-pompier-navy outline-none"
+                                                />
+                                            </div>
                                             <datalist id="ean-labels-suggestions">
                                                 <option value="Pack de 24" />
                                                 <option value="Pack de 12" />
                                                 <option value="Pack de 6" />
                                                 <option value="Canette / Unité" />
                                                 <option value="Bouteille / Unité" />
-                                                <option value="Carton / Boîte" />
+                                                <option value="Carton de 24" />
                                             </datalist>
                                             <button 
                                                 type="button"
-                                                onClick={() => handleAddEanToProduct(newEanCodeInput, newEanLabelInput)}
-                                                class="sm:col-span-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg py-1.5 text-xs"
+                                                onClick={() => handleAddEanToProduct(newEanCodeInput, newEanLabelInput, newEanMultiplierInput)}
+                                                class="sm:col-span-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg py-1.5 text-xs"
                                             >
                                                 + Lier
                                             </button>
@@ -1663,7 +1754,7 @@
                         title="Scanner un code-barres à associer"
                         onDetected={(code) => {
                             setShowProductEanScanner(false);
-                            handleAddEanToProduct(code, newEanLabelInput);
+                            handleAddEanToProduct(code, newEanLabelInput, newEanMultiplierInput);
                         }}
                     />
 
@@ -1675,7 +1766,7 @@
                         onDetected={handleStockTabScanDetected}
                     />
 
-                    {/* MODALE CODE INCONNU (MODE BUREAU / ADMIN) */}
+                    {/* MODALE CODE INCONNU (MODE BUREAU / ADMIN) AVEC CONTENANCE DU PACK */}
                     {unknownEanModalCode && isAdmin && (
                         <div class="no-print fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
                             <div class="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
@@ -1701,14 +1792,37 @@
                                                     <option key={item.id} value={item.id}>{item.nom} ({item.format})</option>
                                                 ))}
                                             </select>
-                                            <input 
-                                                type="text" 
-                                                list="ean-labels-suggestions"
-                                                placeholder="Conditionnement (ex: Pack de 24, Unité...)" 
-                                                value={associateLabel}
-                                                onChange={e => setAssociateLabel(e.target.value)}
-                                                class="w-full border rounded-lg p-2 text-sm"
-                                            />
+                                            <div class="grid grid-cols-3 gap-2">
+                                                <div class="col-span-2">
+                                                    <label class="block text-[10px] font-bold text-gray-500 uppercase mb-0.5">Conditionnement</label>
+                                                    <input 
+                                                        type="text" 
+                                                        list="ean-labels-suggestions"
+                                                        placeholder="Ex: Pack de 6, Unité..." 
+                                                        value={associateLabel}
+                                                        onChange={e => {
+                                                            const val = e.target.value;
+                                                            setAssociateLabel(val);
+                                                            setAssociateMultiplier(guessMultiplierFromLabel(val));
+                                                        }}
+                                                        class="w-full border rounded-lg p-2 text-sm"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label class="block text-[10px] font-bold text-gray-500 uppercase mb-0.5">Unités / Pack</label>
+                                                    <div class="flex items-center border rounded-lg p-2 bg-emerald-50 border-emerald-300">
+                                                        <span class="text-xs font-bold text-emerald-700 mr-1">×</span>
+                                                        <input 
+                                                            type="number" 
+                                                            min="1"
+                                                            value={associateMultiplier}
+                                                            onChange={e => setAssociateMultiplier(e.target.value)}
+                                                            onFocus={e => e.target.select()}
+                                                            class="w-full font-extrabold text-sm text-emerald-900 bg-transparent outline-none text-center"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
                                             <button type="submit" class="w-full bg-pompier-navy hover:bg-blue-900 text-white font-bold py-2.5 rounded-lg text-sm">
                                                 <i class="fa-solid fa-link mr-1.5"></i>Associer à cet article
                                             </button>
@@ -1766,7 +1880,6 @@
                                                 <i class="fa-solid fa-plus mr-1"></i>Créer
                                             </button>
                                         </div>
-                                        {/* Barre rapide de sélection d'emoji */}
                                         <div class="flex flex-wrap gap-1 pt-1">
                                             {EMOJI_SUGGESTIONS.map(em => (
                                                 <button 
@@ -1845,47 +1958,129 @@
                         </div>
                     )}
 
-                    {showRestockModal && restockItem && isAdmin && (
-                        <div class="no-print fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
-                            <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden">
-                                <div class="bg-emerald-600 text-white px-5 py-4 flex justify-between items-center">
-                                    <h2 class="text-lg font-bold"><i class="fa-solid fa-arrow-down-to-bracket mr-2"></i>Entrée de stock</h2>
-                                    <button onClick={() => setShowRestockModal(false)} class="text-white"><i class="fa-solid fa-times"></i></button>
-                                </div>
-                                <form onSubmit={handleConfirmRestock} class="p-5 space-y-4">
-                                    <div>
-                                        {restockScannedLabel && (
-                                            <span class="inline-block bg-emerald-100 text-emerald-800 text-[11px] font-bold px-2.5 py-0.5 rounded-full mb-1">
-                                                <i class="fa-solid fa-barcode mr-1"></i>Code scanné : {restockScannedLabel}
-                                            </span>
-                                        )}
-                                        <h3 class="text-lg font-bold text-pompier-navy">{restockItem.nom}</h3>
-                                        <p class="text-xs text-gray-500">Stock actuel : <strong>{restockItem.quantite}</strong> ({restockItem.format})</p>
+                    {/* MODALE ENTRÉE DE STOCK AVEC MULTIPLICATEUR AUTOMATIQUE (PACK -> UNITÉS) */}
+                    {showRestockModal && restockItem && isAdmin && (() => {
+                        const packCount = Math.max(0, parseInt(restockQty, 10) || 0);
+                        const mult = Math.max(1, parseInt(restockMultiplier, 10) || 1);
+                        const totalUnitsAdded = packCount * mult;
+                        const packOptions = Array.isArray(restockItem.codesEan) ? restockItem.codesEan.filter(e => getEffectiveMultiplier(e) > 1) : [];
+
+                        return (
+                            <div class="no-print fixed inset-0 bg-pompier-anthracite bg-opacity-75 flex items-center justify-center p-4 z-50">
+                                <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden">
+                                    <div class="bg-emerald-600 text-white px-5 py-4 flex justify-between items-center">
+                                        <h2 class="text-lg font-bold"><i class="fa-solid fa-arrow-down-to-bracket mr-2"></i>Entrée de stock</h2>
+                                        <button onClick={() => setShowRestockModal(false)} class="text-white"><i class="fa-solid fa-times"></i></button>
                                     </div>
-                                    <div>
-                                        <label class="block text-sm font-bold mb-2">Quantité à ajouter ({restockItem.format}) :</label>
-                                        <input autoFocus required type="number" min="1" value={restockQty} onChange={e => setRestockQty(e.target.value)} class="w-full border-2 border-emerald-500 rounded-lg p-2.5 text-xl font-bold text-center outline-none focus:ring-2 focus:ring-emerald-300" />
-                                    </div>
-                                    <div class="pt-2 border-t border-gray-100">
-                                        <label class="block text-sm font-bold text-gray-700 mb-2">Qui fait cette entrée ?</label>
-                                        <div class="flex items-center bg-gray-50 border rounded-lg px-3 py-2 focus-within:ring-2 ring-emerald-400">
-                                            <i class="fa-solid fa-user text-gray-400 mr-2"></i>
-                                            <input 
-                                                type="text" 
-                                                placeholder="Ton nom / surnom..." 
-                                                value={utilisateur}
-                                                onChange={e => setUtilisateur(e.target.value)}
-                                                class="bg-transparent outline-none flex-1 text-sm font-semibold text-pompier-navy"
-                                            />
+                                    <form onSubmit={handleConfirmRestock} class="p-5 space-y-4">
+                                        <div>
+                                            {restockScannedLabel && (
+                                                <span class="inline-block bg-emerald-100 text-emerald-800 text-[11px] font-bold px-2.5 py-0.5 rounded-full mb-1">
+                                                    <i class="fa-solid fa-barcode mr-1"></i>Scanné : {restockScannedLabel} (×{mult} u.)
+                                                </span>
+                                            )}
+                                            <h3 class="text-lg font-bold text-pompier-navy">{restockItem.nom}</h3>
+                                            <p class="text-xs text-gray-500">Stock actuel : <strong>{restockItem.quantite}</strong> ({restockItem.format})</p>
                                         </div>
-                                    </div>
-                                    <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg shadow transition-colors">
-                                        Valider la rentrée
-                                    </button>
-                                </form>
+
+                                        {/* Choix rapide Unité ou Pack si plusieurs formats existent */}
+                                        <div class="bg-gray-50 p-2.5 rounded-xl border border-gray-200 space-y-2">
+                                            <span class="text-[10px] font-bold uppercase text-gray-500 block">Mode de comptage de cette entrée :</span>
+                                            <div class="flex flex-wrap gap-1.5">
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => { setRestockMultiplier(1); setRestockScannedLabel('Unité'); }}
+                                                    class={`px-2.5 py-1 rounded-lg text-xs font-bold border transition ${mult === 1 ? 'bg-pompier-navy text-white border-pompier-navy' : 'bg-white text-gray-600 border-gray-300'}`}
+                                                >
+                                                    À l'unité (×1)
+                                                </button>
+                                                {packOptions.map(p => {
+                                                    const m = getEffectiveMultiplier(p);
+                                                    return (
+                                                        <button 
+                                                            key={p.code}
+                                                            type="button"
+                                                            onClick={() => { setRestockMultiplier(m); setRestockScannedLabel(p.label); }}
+                                                            class={`px-2.5 py-1 rounded-lg text-xs font-bold border transition ${mult === m && restockScannedLabel === p.label ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-700 border-gray-300'}`}
+                                                        >
+                                                            {p.label} (×{m})
+                                                        </button>
+                                                    );
+                                                })}
+                                                {[6, 12, 24].filter(n => !packOptions.some(p => getEffectiveMultiplier(p) === n)).map(n => (
+                                                    <button 
+                                                        key={n}
+                                                        type="button"
+                                                        onClick={() => { setRestockMultiplier(n); setRestockScannedLabel(`Pack de ${n}`); }}
+                                                        class={`px-2.5 py-1 rounded-lg text-xs font-bold border transition ${mult === n ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-300'}`}
+                                                    >
+                                                        Pack de {n} (×{n})
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <label class="block text-sm font-bold text-pompier-navy text-center mb-2">
+                                                {mult > 1 ? `Combien de [${restockScannedLabel || `Pack de ${mult}`}] rentres-tu ?` : `Quantité d'unités à ajouter :`}
+                                            </label>
+                                            <div class="flex items-center justify-center space-x-3">
+                                                <button 
+                                                    type="button" 
+                                                    onClick={() => setRestockQty(q => String(Math.max(1, (parseInt(q, 10) || 1) - 1)))}
+                                                    class="w-11 h-11 rounded-xl bg-gray-100 hover:bg-gray-200 font-extrabold text-xl text-pompier-navy"
+                                                >-</button>
+                                                <input 
+                                                    autoFocus 
+                                                    required 
+                                                    type="number" 
+                                                    inputMode="numeric"
+                                                    min="1" 
+                                                    value={restockQty} 
+                                                    onChange={e => setRestockQty(e.target.value)} 
+                                                    onFocus={e => e.target.select()}
+                                                    class="w-24 border-2 border-emerald-500 rounded-xl p-2 text-2xl font-extrabold text-center text-pompier-navy outline-none focus:ring-2 focus:ring-emerald-300" 
+                                                />
+                                                <button 
+                                                    type="button" 
+                                                    onClick={() => setRestockQty(q => String((parseInt(q, 10) || 1) + 1))}
+                                                    class="w-11 h-11 rounded-xl bg-emerald-600 hover:bg-emerald-700 font-extrabold text-xl text-white"
+                                                >+</button>
+                                            </div>
+                                        </div>
+
+                                        {/* Affichage clair de la conversion en unités */}
+                                        <div class="bg-emerald-50 border border-emerald-300 rounded-xl p-3 text-center">
+                                            <span class="text-xs text-emerald-800 block">Mise à jour automatique du stock :</span>
+                                            <span class="font-extrabold text-base text-emerald-900">
+                                                {mult > 1 ? `${packCount} × ${mult} = +${totalUnitsAdded} unités ajoutées` : `+${totalUnitsAdded} unité(s) ajoutée(s)`}
+                                            </span>
+                                            <span class="text-[11px] text-emerald-700 block mt-0.5">
+                                                Nouveau stock : <strong>{(restockItem.quantite || 0) + totalUnitsAdded}</strong>
+                                            </span>
+                                        </div>
+
+                                        <div class="pt-2 border-t border-gray-100">
+                                            <label class="block text-sm font-bold text-gray-700 mb-1.5">Qui fait cette entrée ?</label>
+                                            <div class="flex items-center bg-gray-50 border rounded-lg px-3 py-2 focus-within:ring-2 ring-emerald-400">
+                                                <i class="fa-solid fa-user text-gray-400 mr-2"></i>
+                                                <input 
+                                                    type="text" 
+                                                    placeholder="Ton nom / surnom..." 
+                                                    value={utilisateur}
+                                                    onChange={e => setUtilisateur(e.target.value)}
+                                                    class="bg-transparent outline-none flex-1 text-sm font-semibold text-pompier-navy"
+                                                />
+                                            </div>
+                                        </div>
+                                        <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg shadow transition-colors">
+                                            Valider (+{totalUnitsAdded} en stock)
+                                        </button>
+                                    </form>
+                                </div>
                             </div>
-                        </div>
-                    )}
+                        );
+                    })()}
                 </div>
             );
         }
@@ -1900,7 +2095,6 @@
             const [selectedRecipientBySupplier, setSelectedRecipientBySupplier] = useState({});
             const [addArticleSelect, setAddArticleSelect] = useState({});
 
-            // Coordonnées du responsable de la commande (vides au 1er lancement, mémorisées sur l'appareil)
             const [respNom, setRespNom] = useState(() => localStorage.getItem('foyer_resp_nom') || '');
             const [respTel, setRespTel] = useState(() => localStorage.getItem('foyer_resp_tel') || '');
             const [respEmail, setRespEmail] = useState(() => localStorage.getItem('foyer_resp_email') || '');
@@ -1928,14 +2122,19 @@
                 return true;
             };
 
-            // Initialiser avec les produits actifs en alerte
+            // Initialiser avec les produits actifs en alerte (calcul intelligent du nombre de packs selon le seuil en unités)
             useEffect(() => {
                 setOrderQties(prev => {
                     const next = { ...prev };
                     stock.forEach(item => {
                         const isAlert = item.alerteActive !== false && item.quantite <= item.seuil;
                         if (isAlert && next[item.id] === undefined) {
-                            next[item.id] = Math.max(1, (item.seuil - item.quantite) + 2);
+                            const primaryEan = getPrimaryEan(item);
+                            const packMult = primaryEan ? getEffectiveMultiplier(primaryEan) : guessMultiplierFromLabel(item.format);
+                            const unitsNeeded = Math.max(1, (item.seuil - item.quantite) + (packMult > 1 ? packMult : 2));
+                            next[item.id] = packMult > 1
+                                ? Math.max(1, Math.ceil((item.seuil - item.quantite + 1) / packMult))
+                                : unitsNeeded;
                         }
                     });
                     return next;
@@ -1966,7 +2165,6 @@
                 setCustomAddedIds(prev => prev.filter(item => item !== id));
             };
 
-            // Liste de tous les fournisseurs + groupe "unassigned"
             const supplierIds = useMemo(() => {
                 const ids = Object.keys(fournisseurs);
                 const hasUnassigned = stock.some(i => !i.fournisseurId || !fournisseurs[i.fournisseurId]);
@@ -1974,7 +2172,6 @@
                 return ids;
             }, [fournisseurs, stock]);
 
-            // Regrouper les articles par fournisseur
             const groupedOrders = useMemo(() => {
                 const groups = {};
                 supplierIds.forEach(fId => {
@@ -2007,7 +2204,6 @@
                 setPreviewSupplierId(fId);
             };
 
-            // Envoi du Bon de Commande par mail avec fenêtre de confirmation préalable et copie automatique
             const handleSendPurchaseOrderEmail = (fId, targetChoice) => {
                 if (!verifyRespInfo()) return;
 
@@ -2044,7 +2240,6 @@
                     return alert("Veuillez choisir un destinataire valide.");
                 }
 
-                // Ajout automatique de l'e-mail du responsable en copie s'il est renseigné
                 let copyNotice = "";
                 if (contactEmailActif) {
                     const alreadyIncluded = targetEmails.some(e => e.toLowerCase() === contactEmailActif.toLowerCase());
@@ -2063,10 +2258,9 @@
                 const cleanSupplierName = (fData.nom || 'Fournisseur').replace(/[^a-zA-Z0-9_-]/g, '_');
                 const pdfFileName = `${numBon}_${cleanSupplierName}.pdf`;
 
-                // DEMANDE DE CONFIRMATION AVANT L'ENVOI
                 const confirmationMessage = `⚠️ Confirmation d'envoi par e-mail :\n\n` +
                     `• Document : Bon de Commande ${numBon} (${fData.nom})\n` +
-                    `• Contenu : ${items.length} référence(s) (${totalUnitCount} unité(s))\n` +
+                    `• Contenu : ${items.length} référence(s) (${totalUnitCount} colis/unité(s))\n` +
                     `• Responsable : ${contactNomActif} (${contactTelActif})\n` +
                     (note ? `• Observation : "${note}"\n` : '') +
                     `• Pièce jointe : ${pdfFileName}\n\n` +
@@ -2079,6 +2273,7 @@
 
                 const rowsHtml = items.map((item, idx) => {
                     const primaryEan = getPrimaryEan(item);
+                    const condLabel = primaryEan && primaryEan.label ? primaryEan.label : item.format;
                     const eanHtml = primaryEan 
                         ? `<div style="font-size:11px; color:#4b5563; font-family:monospace; margin-top:2px;">EAN : ${primaryEan.code}${primaryEan.label ? ` (${primaryEan.label})` : ''}</div>` 
                         : '';
@@ -2090,7 +2285,7 @@
                                 ${eanHtml}
                             </td>
                             <td style="padding: 10px 12px; font-size: 12px; color: #4b5563; border: 1px solid #d1d5db;">${item.famille || 'Stock'}</td>
-                            <td style="padding: 10px 12px; font-size: 12px; color: #374151; font-weight: 600; border: 1px solid #d1d5db;">${item.format}</td>
+                            <td style="padding: 10px 12px; font-size: 12px; color: #374151; font-weight: 600; border: 1px solid #d1d5db;">${condLabel}</td>
                             <td style="padding: 10px 12px; font-size: 14px; font-weight: 800; color: #e3001b; text-align: center; border: 1px solid #d1d5db;">${orderQties[item.id]}</td>
                         </tr>
                     `;
@@ -2098,8 +2293,9 @@
 
                 const textLines = items.map(i => {
                     const primaryEan = getPrimaryEan(i);
+                    const condLabel = primaryEan && primaryEan.label ? primaryEan.label : i.format;
                     const eanTxt = primaryEan ? ` [EAN: ${primaryEan.code}]` : '';
-                    return `- ${orderQties[i.id]}x ${i.nom} (${i.format})${eanTxt}`;
+                    return `- ${orderQties[i.id]}x ${i.nom} (${condLabel})${eanTxt}`;
                 }).join('\n');
 
                 const pdfObservationsBlock = note
@@ -2156,7 +2352,7 @@
                                         <th style="padding:9px 10px; font-size:11px; text-transform:uppercase; width:36px; text-align:center;">Réf.</th>
                                         <th style="padding:9px 10px; font-size:11px; text-transform:uppercase;">Désignation</th>
                                         <th style="padding:9px 10px; font-size:11px; text-transform:uppercase;">Famille</th>
-                                        <th style="padding:9px 10px; font-size:11px; text-transform:uppercase;">Format</th>
+                                        <th style="padding:9px 10px; font-size:11px; text-transform:uppercase;">Conditionnement</th>
                                         <th style="padding:9px 10px; font-size:11px; text-transform:uppercase; text-align:center; width:80px;">Quantité</th>
                                     </tr>
                                 </thead>
@@ -2165,7 +2361,7 @@
                                 </tbody>
                                 <tfoot>
                                     <tr style="background-color:#f3f4f6;">
-                                        <td colspan="4" style="padding:10px 12px; font-size:13px; font-weight:bold; color:#1a2b4c; text-align:right; border:1px solid #d1d5db;">Total d'unités commandées (${items.length} réf.) :</td>
+                                        <td colspan="4" style="padding:10px 12px; font-size:13px; font-weight:bold; color:#1a2b4c; text-align:right; border:1px solid #d1d5db;">Total commandé (${items.length} réf.) :</td>
                                         <td style="padding:10px 12px; font-size:15px; font-weight:800; color:#1a2b4c; text-align:center; border:1px solid #d1d5db;">${totalUnitCount}</td>
                                     </tr>
                                 </tfoot>
@@ -2276,7 +2472,7 @@
                         </tbody>
                         <tfoot>
                             <tr style="background-color:#f3f4f6;">
-                                <td colspan="4" style="padding:10px 12px; font-size:12px; font-weight:bold; color:#1a2b4c; text-align:right; border:1px solid #d1d5db;">TOTAL D'UNITÉS COMMANDÉES (${items.length} référence${items.length > 1 ? 's' : ''}) :</td>
+                                <td colspan="4" style="padding:10px 12px; font-size:12px; font-weight:bold; color:#1a2b4c; text-align:right; border:1px solid #d1d5db;">TOTAL COMMANDÉ (${items.length} référence${items.length > 1 ? 's' : ''}) :</td>
                                 <td style="padding:10px 12px; font-size:15px; font-weight:800; color:#1a2b4c; text-align:center; border:1px solid #d1d5db;">${totalUnitCount}</td>
                             </tr>
                         </tfoot>
@@ -2337,7 +2533,11 @@
                 if (!fData || !fData.tel) return alert("Numéro du fournisseur non renseigné.");
                 const activeItems = items.filter(i => (orderQties[i.id] || 0) > 0);
                 if (activeItems.length === 0) return alert("Aucune quantité sélectionnée.");
-                const list = activeItems.map(i => `- ${orderQties[i.id]}x ${i.nom} (${i.format})`).join('\n');
+                const list = activeItems.map(i => {
+                    const primaryEan = getPrimaryEan(i);
+                    const condLabel = primaryEan && primaryEan.label ? primaryEan.label : i.format;
+                    return `- ${orderQties[i.id]}x ${i.nom} (${condLabel})`;
+                }).join('\n');
                 const hasCompte = fData.numCompte && fData.numCompte.trim() !== '';
                 const compteSms = hasCompte ? `\nN° Compte client : ${fData.numCompte.trim()}` : '';
                 const emailSms = contactEmailActif ? `\nEmail contact : ${contactEmailActif}` : '';
@@ -2348,7 +2548,6 @@
                 window.location.href = `sms:${fData.tel.replace(/\s+/g, '')}?body=${encodeURIComponent(body)}`;
             };
 
-            // Si un fournisseur est ouvert dans le Centre d'Impression A4 / PDF
             if (previewSupplierId) {
                 const fId = previewSupplierId;
                 const fData = fId === 'unassigned' ? { nom: "Sans Fournisseur Associé", numCompte: "", adresse: "", email: "", tel: "" } : (fournisseurs[fId] || { nom: "Fournisseur inconnu" });
@@ -2412,7 +2611,6 @@
                             </div>
                         </div>
 
-                        {/* FEUILLE A4 OFFICIELLE DU BON DE COMMANDE */}
                         <div class="print-sheet bg-white max-w-4xl mx-auto p-8 sm:p-10 rounded-xl shadow-lg border border-gray-200 text-gray-900">
                             <div class="flex flex-col sm:flex-row justify-between items-start border-b-4 border-pompier-red pb-6 gap-4">
                                 <div class="flex items-start space-x-4">
@@ -2486,6 +2684,7 @@
                                         ) : (
                                             itemsToPrint.map((item, idx) => {
                                                 const primaryEan = getPrimaryEan(item);
+                                                const condLabel = primaryEan && primaryEan.label ? primaryEan.label : item.format;
                                                 return (
                                                     <tr key={item.id} class={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                                                         <td class="py-2.5 px-3 border border-gray-300 text-center font-mono text-xs text-gray-500">{idx + 1}</td>
@@ -2498,7 +2697,7 @@
                                                             )}
                                                         </td>
                                                         <td class="py-2.5 px-3 border border-gray-300 text-xs text-gray-600">{item.famille}</td>
-                                                        <td class="py-2.5 px-3 border border-gray-300 text-xs text-gray-700 font-semibold">{item.format}</td>
+                                                        <td class="py-2.5 px-3 border border-gray-300 text-xs text-gray-700 font-semibold">{condLabel}</td>
                                                         <td class="py-2.5 px-3 border border-gray-300 text-center font-extrabold text-base text-pompier-red">{orderQties[item.id]}</td>
                                                     </tr>
                                                 );
@@ -2507,7 +2706,7 @@
                                     </tbody>
                                     <tfoot>
                                         <tr class="bg-gray-100 font-bold text-pompier-navy text-sm border-t-2 border-pompier-navy">
-                                            <td colSpan="4" class="py-2.5 px-3 text-right uppercase text-xs">Total d'unités commandées ({itemsToPrint.length} référence{itemsToPrint.length > 1 ? 's' : ''}) :</td>
+                                            <td colSpan="4" class="py-2.5 px-3 text-right uppercase text-xs">Total commandé ({itemsToPrint.length} référence{itemsToPrint.length > 1 ? 's' : ''}) :</td>
                                             <td class="py-2.5 px-3 text-center font-extrabold text-base">{totalUnits}</td>
                                         </tr>
                                     </tfoot>
@@ -2574,7 +2773,6 @@
                 );
             }
 
-            // VUE PRINCIPALE DE L'ONGLET COMMANDES & BONS PAR FOURNISSEUR
             const visibleSupplierIds = supplierIds.filter(fId => {
                 if (selectedFournisseurFilter !== 'Tous' && fId !== selectedFournisseurFilter) return false;
                 if (fId === 'unassigned' && (!groupedOrders[fId] || groupedOrders[fId].length === 0)) return false;
@@ -2737,24 +2935,31 @@
                                                         const isAlert = item.alerteActive !== false && item.quantite <= item.seuil;
                                                         const qty = orderQties[item.id] || 0;
                                                         const primaryEan = getPrimaryEan(item);
+                                                        const condLabel = primaryEan && primaryEan.label ? primaryEan.label : item.format;
+                                                        const packMult = primaryEan ? getEffectiveMultiplier(primaryEan) : guessMultiplierFromLabel(item.format);
                                                         return (
                                                             <div key={item.id} class={`p-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 ${qty > 0 ? 'bg-white' : 'bg-gray-50 opacity-60'}`}>
                                                                 <div>
                                                                     <div class="flex flex-wrap items-center gap-2">
                                                                         <span class="font-bold text-pompier-navy">{item.nom}</span>
-                                                                        <span class="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded font-semibold">{item.format}</span>
+                                                                        <span class="text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded font-semibold">{condLabel}</span>
                                                                         {primaryEan && (
                                                                             <span class="text-[11px] font-mono bg-blue-50 text-pompier-navy border border-blue-200 px-2 py-0.5 rounded">
                                                                                 EAN : {primaryEan.code}
                                                                             </span>
                                                                         )}
-                                                                        {isAlert && <span class="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded uppercase">Stock : {item.quantite} (Seuil : {item.seuil})</span>}
-                                                                        {!isAlert && <span class="text-[10px] bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded">Stock : {item.quantite}</span>}
+                                                                        {isAlert && <span class="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded uppercase">Stock : {item.quantite} u. (Seuil : {item.seuil})</span>}
+                                                                        {!isAlert && <span class="text-[10px] bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded">Stock : {item.quantite} u.</span>}
                                                                     </div>
                                                                 </div>
 
                                                                 <div class="flex items-center space-x-2 self-end sm:self-auto">
-                                                                    <span class="text-xs text-gray-500 font-semibold mr-1">Qté à commander :</span>
+                                                                    {packMult > 1 && qty > 0 && (
+                                                                        <span class="text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-bold">
+                                                                            = {qty * packMult} u.
+                                                                        </span>
+                                                                    )}
+                                                                    <span class="text-xs text-gray-500 font-semibold mr-1">Qté ({condLabel}) :</span>
                                                                     <div class="flex items-center space-x-1 bg-gray-50 border border-gray-300 rounded-lg px-1.5 py-1">
                                                                         <button type="button" onClick={() => adjustQty(item.id, -1)} class="w-7 h-7 flex items-center justify-center text-gray-600 hover:text-pompier-red rounded font-bold">-</button>
                                                                         <input 
@@ -2907,6 +3112,7 @@
             const [scannedMatch, setScannedMatch] = useState(null);
             const [scanQtyInput, setScanQtyInput] = useState('1');
             const [unknownPublicCode, setUnknownPublicCode] = useState(null);
+            const [showMobileCartModal, setShowMobileCartModal] = useState(false);
 
             const handleCartChange = (id, delta, maxStock) => {
                 setCart(prev => {
@@ -3023,14 +3229,16 @@
                 }
 
                 setCart({});
+                setShowMobileCartModal(false);
                 alert("Sorties enregistrées avec succès !");
             };
 
             const totalItemsCount = Object.values(cart).reduce((a, b) => a + (Number(b) || 0), 0);
+            const totalRefsCount = Object.keys(cart).length;
             const catalogForCart = fullStock || stock;
 
             return (
-                <div class="no-print grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class={`no-print grid grid-cols-1 lg:grid-cols-3 gap-6 ${totalItemsCount > 0 ? 'pb-24 lg:pb-0' : ''}`}>
                     <div class="lg:col-span-2 space-y-4">
                         <div class="bg-white p-3.5 sm:p-4 rounded-xl shadow-sm border border-gray-200">
                             <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
@@ -3053,7 +3261,6 @@
                             {stock.length === 0 ? (
                                 <p class="text-center text-gray-400 py-8 italic">Aucun article ne correspond à la recherche.</p>
                             ) : viewMode === 'list' ? (
-                                /* MODE LISTE COMPACTE (LIGNES FINES) */
                                 <div class="divide-y divide-gray-200 border border-gray-200 rounded-xl overflow-hidden">
                                     {stock.map(item => {
                                         const qtyInCart = cart[item.id] || 0;
@@ -3108,7 +3315,6 @@
                                     })}
                                 </div>
                             ) : (
-                                /* MODE GRILLE 2 COLONNES SUR TÉLÉPHONE */
                                 <div class="grid grid-cols-2 gap-2.5 sm:gap-3">
                                     {stock.map(item => {
                                         const qtyInCart = cart[item.id] || 0;
@@ -3205,6 +3411,118 @@
                         </div>
                     </div>
 
+                    {/* BARRE FLOTTANTE FIXE EN BAS D'ÉCRAN SUR TÉLÉPHONE DÈS QU'UN ARTICLE EST SÉLECTIONNÉ */}
+                    {totalItemsCount > 0 && (
+                        <div class="lg:hidden fixed bottom-0 left-0 right-0 bg-pompier-navy text-white p-3 shadow-2xl border-t-4 border-pompier-red z-40 flex items-center justify-between gap-3">
+                            <div class="flex items-center space-x-2.5 min-w-0">
+                                <div class="bg-pompier-red text-white font-extrabold w-10 h-10 rounded-xl flex items-center justify-center text-base shrink-0 shadow">
+                                    {totalItemsCount}
+                                </div>
+                                <div class="truncate">
+                                    <span class="font-bold text-sm block leading-tight">Panier de sortie</span>
+                                    <span class="text-[11px] text-gray-300">{totalRefsCount} référence{totalRefsCount > 1 ? 's' : ''} sélectionnée{totalRefsCount > 1 ? 's' : ''}</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center space-x-2 shrink-0">
+                                <button 
+                                    type="button"
+                                    onClick={() => setCart({})}
+                                    class="bg-gray-700 hover:bg-gray-600 text-gray-200 p-2.5 rounded-xl text-xs"
+                                    title="Vider le panier"
+                                >
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                                <button 
+                                    type="button"
+                                    onClick={() => setShowMobileCartModal(true)}
+                                    class="bg-pompier-red hover:bg-red-700 text-white font-extrabold px-4 py-2.5 rounded-xl text-sm shadow-lg flex items-center space-x-2"
+                                >
+                                    <i class="fa-solid fa-check-double"></i>
+                                    <span>Valider ({totalItemsCount})</span>
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* FENÊTRE MODALE DE VALIDATION RAPIDE SUR TÉLÉPHONE */}
+                    {showMobileCartModal && (
+                        <div class="no-print fixed inset-0 bg-pompier-anthracite bg-opacity-80 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
+                            <div class="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border-t-4 sm:border-2 border-pompier-navy">
+                                <div class="bg-pompier-navy text-white px-5 py-4 flex justify-between items-center border-b-4 border-pompier-red">
+                                    <h3 class="font-bold text-base flex items-center">
+                                        <i class="fa-solid fa-list-check mr-2 text-pompier-red"></i>
+                                        Confirmer la sortie ({totalItemsCount} art.)
+                                    </h3>
+                                    <button type="button" onClick={() => setShowMobileCartModal(false)} class="text-white hover:text-gray-300">
+                                        <i class="fa-solid fa-times text-xl"></i>
+                                    </button>
+                                </div>
+
+                                <div class="p-5 space-y-4">
+                                    <div class="max-h-52 overflow-y-auto divide-y border rounded-xl px-3 bg-gray-50">
+                                        {Object.entries(cart).map(([id, qty]) => {
+                                            const item = catalogForCart.find(i => i.id === id);
+                                            if (!item) return null;
+                                            return (
+                                                <div key={id} class="py-2.5 flex justify-between items-center text-sm">
+                                                    <div class="min-w-0 pr-2">
+                                                        <span class="font-bold text-pompier-navy block truncate">{item.nom}</span>
+                                                        <span class="text-xs text-gray-500">{item.format}</span>
+                                                    </div>
+                                                    <div class="flex items-center space-x-3 shrink-0">
+                                                        <span class="font-extrabold text-base text-pompier-red">-{qty}</span>
+                                                        <button 
+                                                            type="button"
+                                                            onClick={() => {
+                                                                handleDirectCartInput(id, '', item.quantite);
+                                                                if (Object.keys(cart).length <= 1) setShowMobileCartModal(false);
+                                                            }} 
+                                                            class="text-gray-400 hover:text-red-600 p-1"
+                                                        >
+                                                            <i class="fa-solid fa-trash text-xs"></i>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-bold text-pompier-navy mb-1.5">Qui enregistre cette sortie ? *</label>
+                                        <div class="flex items-center bg-gray-50 border-2 border-gray-300 rounded-xl px-3 py-2.5 focus-within:border-pompier-red focus-within:bg-white">
+                                            <i class="fa-solid fa-user text-gray-400 mr-2"></i>
+                                            <input 
+                                                type="text" 
+                                                placeholder="Ton nom / surnom..." 
+                                                value={utilisateur} 
+                                                onChange={e => setUtilisateur(e.target.value)} 
+                                                class="bg-transparent outline-none flex-1 text-base font-bold text-pompier-navy" 
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div class="flex space-x-2 pt-1">
+                                        <button 
+                                            type="button"
+                                            onClick={() => setShowMobileCartModal(false)}
+                                            class="w-1/3 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-3 rounded-xl text-sm"
+                                        >
+                                            Continuer
+                                        </button>
+                                        <button 
+                                            type="button"
+                                            onClick={confirmValidation}
+                                            class="w-2/3 bg-pompier-red hover:bg-red-700 text-white font-extrabold py-3 rounded-xl text-sm shadow-lg flex items-center justify-center space-x-2"
+                                        >
+                                            <i class="fa-solid fa-check"></i>
+                                            <span>Valider la sortie</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     <BarcodeScannerModal 
                         isOpen={showScanner}
                         onClose={() => setShowScanner(false)}
@@ -3212,11 +3530,12 @@
                         onDetected={handleSortieScanDetected}
                     />
 
+                    {/* FENÊTRE DE QUANTITÉ APRÈS SCAN EN SORTIE (SORTIE À L'UNITÉ PAR DÉFAUT) */}
                     {scannedMatch && (() => {
                         const { item, eanEntry } = scannedMatch;
                         const alreadyInCart = Number(cart[item.id]) || 0;
                         const maxAvailable = Math.max(0, item.quantite - alreadyInCart);
-                        const isUnitWarning = eanEntry.label && /unit|canette|bouteille/i.test(eanEntry.label) && /pack|carton|lot/i.test(item.format || '');
+                        const packMult = getEffectiveMultiplier(eanEntry);
 
                         return (
                             <div class="no-print fixed inset-0 bg-pompier-anthracite bg-opacity-80 flex items-center justify-center p-4 z-50">
@@ -3234,7 +3553,7 @@
                                             </div>
                                             <h4 class="font-extrabold text-lg text-pompier-navy">{item.nom}</h4>
                                             <p class="text-xs text-gray-600 mt-0.5">
-                                                Stock géré par : <strong>{item.format}</strong> · Dispo : <strong>{maxAvailable}</strong>
+                                                Stock disponible : <strong>{maxAvailable}</strong> ({item.format})
                                             </p>
                                         </div>
 
@@ -3243,42 +3562,46 @@
                                                 ⚠️ Rupture de stock en réserve (0 disponible) !
                                             </div>
                                         ) : (
-                                            <>
-                                                {isUnitWarning && (
-                                                    <div class="bg-amber-50 border-l-4 border-amber-500 p-2.5 rounded text-xs text-amber-900">
-                                                        <strong>⚠️ Attention :</strong> Tu as scanné le code d'une <strong>{eanEntry.label}</strong>, alors que le stock est compté en <strong>{item.format}</strong>.
+                                            <div>
+                                                <label class="block text-sm font-bold text-pompier-navy text-center mb-2">
+                                                    Combien d'unités sors-tu ?
+                                                </label>
+                                                <div class="flex items-center justify-center space-x-3">
+                                                    <button 
+                                                        type="button" 
+                                                        onClick={() => setScanQtyInput(q => String(Math.max(1, (parseInt(q, 10) || 1) - 1)))}
+                                                        class="w-11 h-11 rounded-xl bg-gray-100 hover:bg-gray-200 font-extrabold text-xl text-pompier-navy"
+                                                    >-</button>
+                                                    <input 
+                                                        autoFocus
+                                                        type="number" 
+                                                        inputMode="numeric"
+                                                        min="1" 
+                                                        max={maxAvailable}
+                                                        value={scanQtyInput}
+                                                        onChange={e => setScanQtyInput(e.target.value)}
+                                                        onFocus={e => e.target.select()}
+                                                        class="w-20 text-center border-2 border-pompier-red rounded-xl py-2 text-2xl font-extrabold text-pompier-navy outline-none"
+                                                    />
+                                                    <button 
+                                                        type="button" 
+                                                        onClick={() => setScanQtyInput(q => String(Math.min(maxAvailable, (parseInt(q, 10) || 1) + 1)))}
+                                                        class="w-11 h-11 rounded-xl bg-pompier-navy hover:bg-blue-900 font-extrabold text-xl text-white"
+                                                    >+</button>
+                                                </div>
+
+                                                {packMult > 1 && maxAvailable >= packMult && (
+                                                    <div class="text-center mt-2.5">
+                                                        <button 
+                                                            type="button"
+                                                            onClick={() => setScanQtyInput(String(packMult))}
+                                                            class="text-xs font-bold text-pompier-navy bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-full border border-gray-300"
+                                                        >
+                                                            Ou sortir 1 {eanEntry.label} entier ({packMult} u.)
+                                                        </button>
                                                     </div>
                                                 )}
-
-                                                <div>
-                                                    <label class="block text-sm font-bold text-pompier-navy text-center mb-2">
-                                                        Combien en sors-tu ({item.format}) ?
-                                                    </label>
-                                                    <div class="flex items-center justify-center space-x-3">
-                                                        <button 
-                                                            type="button" 
-                                                            onClick={() => setScanQtyInput(q => String(Math.max(1, (parseInt(q, 10) || 1) - 1)))}
-                                                            class="w-11 h-11 rounded-xl bg-gray-100 hover:bg-gray-200 font-extrabold text-xl text-pompier-navy"
-                                                        >-</button>
-                                                        <input 
-                                                            autoFocus
-                                                            type="number" 
-                                                            inputMode="numeric"
-                                                            min="1" 
-                                                            max={maxAvailable}
-                                                            value={scanQtyInput}
-                                                            onChange={e => setScanQtyInput(e.target.value)}
-                                                            onFocus={e => e.target.select()}
-                                                            class="w-20 text-center border-2 border-pompier-red rounded-xl py-2 text-2xl font-extrabold text-pompier-navy outline-none"
-                                                        />
-                                                        <button 
-                                                            type="button" 
-                                                            onClick={() => setScanQtyInput(q => String(Math.min(maxAvailable, (parseInt(q, 10) || 1) + 1)))}
-                                                            class="w-11 h-11 rounded-xl bg-pompier-navy hover:bg-blue-900 font-extrabold text-xl text-white"
-                                                        >+</button>
-                                                    </div>
-                                                </div>
-                                            </>
+                                            </div>
                                         )}
 
                                         <div class="flex space-x-2 pt-2">
